@@ -1,24 +1,32 @@
 #!/usr/bin/env bash
-# clonethis CLI shim: runs the bun CLI from anywhere, installing deps on first run.
+# clonethis CLI shim: runs the TypeScript CLI on Node (>= 22.18, native type stripping) from anywhere,
+# installing deps on first run. Node, not bun, runs it: bun's pipe to Chromium wedges when sharp (libvips)
+# works in the same process, and every rig here does both.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
 
-if ! command -v bun >/dev/null 2>&1; then
-  echo "bun not found. install: curl -fsSL https://bun.sh/install | bash" >&2
+if ! command -v node >/dev/null 2>&1; then
+  echo "node not found (need >= 22.18). https://nodejs.org" >&2
+  exit 1
+fi
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
+NODE_MINOR="$(node -p 'process.versions.node.split(".")[1]')"
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 18 ]; }; then
+  echo "clonethis needs node >= 22.18 (native TypeScript), found $(node -v)" >&2
   exit 1
 fi
 
 if [ ! -d "$ROOT/node_modules" ]; then
   echo "installing dependencies (first run)" >&2
-  (cd "$ROOT" && bun install)
+  if command -v bun >/dev/null 2>&1; then (cd "$ROOT" && bun install); else (cd "$ROOT" && npm install); fi
 fi
 
 # chromium revision is tied to the installed playwright version; install once per version
-PW_VER="$(cd "$ROOT" && bun -e 'console.log(require("playwright/package.json").version)' 2>/dev/null)"
+PW_VER="$(cd "$ROOT" && node -p 'require("playwright/package.json").version' 2>/dev/null)"
 MARK="$ROOT/node_modules/.chromium-$PW_VER"
 if [ -n "$PW_VER" ] && [ ! -f "$MARK" ]; then
   echo "installing Playwright Chromium for $PW_VER (first run)" >&2
-  (cd "$ROOT" && bunx playwright install chromium) && touch "$MARK"
+  (cd "$ROOT" && npx --yes playwright install chromium) && touch "$MARK"
 fi
 
-exec bun "$ROOT/src/cli.ts" "$@"
+exec node --no-warnings "$ROOT/src/cli.ts" "$@"

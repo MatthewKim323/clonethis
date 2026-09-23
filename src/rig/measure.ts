@@ -79,7 +79,7 @@ export async function runCompare(argv: string[]) {
       if (r.ok && !a.flag('all')) continue;
       const f = (v: number | undefined) => (v === undefined ? '     -' : v.toFixed(1).padStart(6));
       const b = r.build;
-      console.log(`   ${r.ok ? ' ok ' : r.build ? ' ~~ ' : ' -- '} ${f(r.ref.y)} ${f(r.ref.x)} ${f(r.ref.w)} ${f(r.ref.h)} | ${f(b?.y)} ${f(b?.x)} ${f(b?.w)} ${f(b?.h)} | ${f(r.dx)}${f(r.dy)}${f(r.dw)}${f(r.dh)}  ${JSON.stringify(clean(r.text).slice(0, 36))}${r.lines ? ` lines ${r.lines}` : ''}  ${b && b.font !== r.ref.font ? `font ${r.ref.font} -> ${b.font}` : ''}${b && b.color !== r.ref.color ? ` color ${r.ref.color} -> ${b.color}` : ''}`);
+      console.log(`   ${r.ok ? ' ok ' : r.build ? ' ~~ ' : ' -- '} ${f(r.ref.y)} ${f(r.ref.x)} ${f(r.ref.w)} ${f(r.ref.h)} | ${f(b?.y)} ${f(b?.x)} ${f(b?.w)} ${f(b?.h)} | ${f(r.dx)}${f(r.dy)}${f(r.dw)}${f(r.dh)}  ${JSON.stringify(clean(r.text).slice(0, 36))}${r.lines ? ` lines ${r.lines}` : ''}${r.note ? ` (${r.note})` : ''}  ${b && b.font !== r.ref.font ? `font ${r.ref.font} -> ${b.font}` : ''}${b && b.color !== r.ref.color ? ` color ${r.ref.color} -> ${b.color}` : ''}`);
     }
     for (const e of extra) console.log(`   +    only in build: ${JSON.stringify(e.text.slice(0, 40))} at ${e.x},${e.y} ${e.w}x${e.h}`);
     const media = matchMedia(ref.media, m.media, tol);

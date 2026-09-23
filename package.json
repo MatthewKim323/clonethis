@@ -9,7 +9,7 @@
   "scripts": {
     "clonethis": "bun src/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test/e2e.ts"
+    "test": "node --no-warnings test/e2e.ts"
   },
   "dependencies": {
     "node-html-parser": "^7.0.1",

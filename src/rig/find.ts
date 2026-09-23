@@ -41,7 +41,9 @@ export async function runFind(argv: string[]) {
         console.log(`  ${String(c.up).padStart(2)}  ${`${Math.round(c.rect.w)}x${Math.round(c.rect.h)}`.padEnd(12)}  ${String(c.descendants).padStart(4)}  ${label.slice(0, 44).padEnd(44)}  ${c.selector}${c.count > 1 ? `  --nth ${c.nth} (of ${c.count})` : ''}`);
       }
       // outline the chain, biggest first, and shoot the viewport around the hit
-      const top = h.chain[Math.min(h.chain.length - 1, 6)];
+      // frame the biggest level that still fits on screen, so the outlines around it are readable
+      const fits = h.chain.filter((c: any) => c.rect.h <= vp.height - 60);
+      const top = fits.at(-1) ?? h.chain[0];
       await page.evaluate(({ chain, colors }) => {
         document.querySelectorAll('.__ct-find').forEach((e) => e.remove());
         chain.slice(0, 7).forEach((c: any, i: number) => {
@@ -56,7 +58,7 @@ export async function runFind(argv: string[]) {
           document.body.appendChild(d);
         });
       }, { chain: h.chain, colors: COLORS });
-      await page.evaluate((y) => window.scrollTo(0, Math.max(0, y - 80)), top.rect.y);
+      await page.evaluate(({ y, h, vh }) => window.scrollTo(0, Math.max(0, y + h / 2 - vh / 2)), { y: top.rect.y, h: top.rect.h, vh: vp.height });
       await page.waitForTimeout(400);
       const file = path.join(out, `${k}.png`);
       await page.screenshot({ path: file });

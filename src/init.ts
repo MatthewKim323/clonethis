@@ -10,7 +10,7 @@ import path from 'node:path';
 import { Args, usage } from './lib/args.ts';
 import { readOrigin, writeOrigin, brandFor } from './lib/anon.ts';
 
-const TEMPLATES = path.resolve(import.meta.dir, '..', 'templates');
+const TEMPLATES = path.resolve(import.meta.dirname, '..', 'templates');
 const IGNORE_LINE = 'reference/*/.origin.json';
 
 export type ProjectStack = { kind: 'next' | 'vite-react' | 'react' | 'svelte' | 'vue' | 'astro' | 'html'; label: string; tailwind: boolean; motion: string | null; ts: boolean };

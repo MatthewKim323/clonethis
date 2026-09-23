@@ -26,7 +26,7 @@ export async function runServe(argv: string[]) {
   const a = new Args(argv);
   const ref = a.positional[0];
   if (!ref || !fs.existsSync(path.join(ref, 'snapshot', 'index.html'))) usage('usage: clonethis serve <reference/name> [--port 4777]');
-  const s = serveDir(ref, a.num('port', 4777));
+  const s = await serveDir(ref, a.num('port', 4777));
   console.log(`serving ${ref} at ${s.url}\n  snapshot: ${s.url}/snapshot/index.html\nctrl-c to stop`);
   await new Promise(() => {});
 }

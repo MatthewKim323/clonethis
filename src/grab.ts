@@ -18,15 +18,16 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { request, type Browser, type Page } from 'playwright';
 import { Args, usage } from './lib/args.ts';
-import { VIEWPORTS, UA, newCtx, load, reveal, log, closeCtx, BrowserPool, guard, sleep, type Viewport } from './lib/browser.ts';
-import { ct, markRoot, viewportRect, type Locator, type Rect } from './lib/page.ts';
+import { VIEWPORTS, UA, newCtx, load, reveal, log, closeCtx, BrowserPool, guard, sleep, launch, withTimeout, type Viewport } from './lib/browser.ts';
+import { ct, markAndRebrand as markRoot, setRebrand, viewportRect, type Locator, type Rect } from './lib/page.ts';
 import { shootRoot, settleMedia } from './lib/shoot.ts';
 import { Screencast } from './lib/screencast.ts';
 import { statesPass } from './lib/states.ts';
 import { parseCss, splitSelectors, testable, stateOf, writeCss, animationNames, varRefs, fontFaceFamily, cssUrls, rewriteUrls, type Rule, type StyleRule } from './lib/css.ts';
-import { originTokens, writeOrigin, readOrigin, brandFor, scrub, scrubSource, neutralAssetName, neutralComponentName, isReservedToken, type Origin } from './lib/anon.ts';
+import { originTokens, writeOrigin, readOrigin, brandFor, scrub, scrubSource, neutralAssetName, neutralComponentName, isReservedToken, tokenRe, type Origin } from './lib/anon.ts';
 
 const DSF = 2;
+const dbg = (...x: unknown[]) => { if (process.env.CT_DEBUG) log('  [debug]', ...x); };
 
 export type VpData = {
   vp: Viewport; found: boolean; rect?: Rect; count?: number;
@@ -77,7 +78,7 @@ export async function runGrab(argv: string[]) {
 
   // ---------------------------------------------------------------- 1. resolve the target on a desktop load (headed so the user sees it)
   log(`grab -> ${path.relative(process.cwd(), REF)} (headed=${!headless})`);
-  const first = await (await import('./lib/browser.ts')).launch(headless);
+  const first = await launch(headless);
   const fctx = await newCtx(first, vps[0], 1);
   const fpage = await fctx.newPage();
   await load(fpage, url);
@@ -119,6 +120,7 @@ export async function runGrab(argv: string[]) {
   if (risky.length) log(`  blackout: ${risky.join(', ')} also read as web vocabulary, so only the capitalized spelling is scrubbed`);
   log(`  blackout: ${tokens.length} origin token(s) -> "${brand}"; origin kept only in ${name}/.origin.json`);
   const clean = (t: string) => scrubSource(t, tokens, brand, host);
+  if (!a.flag('no-rebrand')) setRebrand(tokens, brand, tokenRe);
 
   // parse every stylesheet once; keep style rule selector parts with their testable form
   const cssFetch = await request.newContext({ userAgent: UA, extraHTTPHeaders: { referer: url } });
@@ -201,7 +203,7 @@ export async function runGrab(argv: string[]) {
   }
   let frames: Record<string, any> = {};
   if (!a.flag('no-frames')) {
-    const g = await guard('frames', a.num('scenario-timeout', 240) * 1000 * 2, async () => { frames = await captureFrames(await pool.get(), url, locator, desk, REF, states, errors); });
+    const g = await guard('frames', a.num('scenario-timeout', 240) * 1000 * 2, async () => { frames = await captureFrames(await pool.get(), url, locator, desk, REF, states, errors, a.num('max-frames', 4)); });
     if (!g.ok) { errors.push(`[frames] ${g.reason}`); await pool.reset(); }
   }
   for (const d of found) {
@@ -332,7 +334,7 @@ function lastCompound(sel: string) {
 }
 
 // ---------------------------------------------------------------- states
-async function captureStates(browser: Browser, url: string, loc: Locator, vp: Viewport, REF: string, max: number) {
+export async function captureStates(browser: Browser, url: string, loc: Locator, vp: Viewport, REF: string, max: number) {
   log('== states (hover / press / focus / open)');
   const dir = path.join(REF, 'capture', 'states');
   fs.rmSync(dir, { recursive: true, force: true });
@@ -355,7 +357,7 @@ async function captureStates(browser: Browser, url: string, loc: Locator, vp: Vi
 }
 
 // ---------------------------------------------------------------- frames
-async function captureFrames(browser: Browser, url: string, loc: Locator, desk: VpData, REF: string, states: any, errors: string[]) {
+export async function captureFrames(_shared: Browser, url: string, loc: Locator, desk: VpData, REF: string, states: any, errors: string[], a_maxFrames = 4) {
   const vp = desk.vp;
   const FR = path.join(REF, 'capture', 'frames');
   fs.rmSync(FR, { recursive: true, force: true });
@@ -364,10 +366,20 @@ async function captureFrames(browser: Browser, url: string, loc: Locator, desk: 
   const pad = 24;
   const cropOf = (r: Rect | null) => (r ? { x: r.x - pad, y: r.y - pad, w: r.w + 2 * pad, h: r.h + 2 * pad } : null);
   const aboveFold = !!desk.context?.root?.inViewportAtLoad;
+  // one fresh browser per scenario, under a watchdog: a long-lived browser that has screencast before can stop
+  // answering after a scroll-driven recording, and one stuck scenario must not cost the rest
+  let browser: Browser = _shared;
+  const scenario = async (label: string, fn: () => Promise<void>) => {
+    browser = await launch(true);
+    try {
+      const g = await guard(`frames ${label}`, 120_000, fn);
+      if (!g.ok) errors.push(`[frames ${label}] ${g.reason}`);
+    } finally { await withTimeout(browser.close(), 5_000, 'browser.close'); }
+  };
   log(`== frames (${aboveFold ? 'load' : 'enter'}, hovers, toggles, loops)`);
 
   // entrance: on-mount for a component above the fold, scroll-in for one below it
-  {
+  await scenario('entrance', async () => {
     const ctx = await newCtx(browser, vp, 1);
     try {
       const page = await ctx.newPage();
@@ -396,31 +408,35 @@ async function captureFrames(browser: Browser, url: string, loc: Locator, desk: 
             const step = () => { const p = Math.min(1, (performance.now() - t0) / dur); window.scrollTo(0, from + (to - from) * ease(p)); if (p < 1) requestAnimationFrame(step); else res(); };
             requestAnimationFrame(step);
           }), { from: startY, to: endY, dur: 1500 });
+          dbg('enter: scrolled');
           await page.waitForTimeout(2500);
           const vr = await viewportRect(page);
+          dbg('enter: finishing');
           report.enter = await sc.finish({ crop: cropOf(vr), vp, extra: { description: 'component scrolled from just below the fold to the viewport center over 1500ms (ease-in-out), then 2500ms hold; fresh page so entrance effects replay', scrollFrom: startY, scrollTo: endY, scrollStartMs: scrollStart } });
         }
       }
     } catch (e: any) { errors.push(`[frames entrance] ${e.message}`); } finally { await closeCtx(ctx); }
-  }
+  });
 
   // hovers + toggles, one fresh page each so nothing carries over
-  const targets = (states?.targets ?? []).filter((t: any) => t.hover && (t.hover.changes.length || t.open?.changes.length)).slice(0, 6);
+  const targets = (states?.targets ?? []).filter((t: any) => t.hover && (t.hover.changes.length || t.open?.changes.length)).slice(0, a_maxFrames);
   for (const t of targets) {
     const nameOf = `${t.click ? 'toggle' : 'hover'}-${String(t.index).padStart(2, '0')}-${t.kind}`;
+    await scenario(nameOf, async () => {
     const ctx = await newCtx(browser, vp, 1);
     try {
       const page = await ctx.newPage();
       await load(page, url);
       await reveal(page);
-      if (!(await markRoot(page, loc))) continue;
+      if (!(await markRoot(page, loc))) return;
       await ct(page, 'tag', '$root');
       await page.evaluate(() => (window as any).__ct.scrollToRoot(document.querySelector('[data-ct-root]'), 'center'));
       await page.mouse.move(2, 2);
       await page.waitForTimeout(900);
       const c = await page.evaluate((cid) => { const e = document.querySelector(`[data-ct-id="${cid}"]`); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, t.target ?? t.cid);
-      if (!c) continue;
+      if (!c) return;
       const before = await viewportRect(page);
+      dbg(nameOf, 'start');
       const sc = new Screencast(path.join(FR, nameOf));
       await sc.start(page, vp);
       await page.waitForTimeout(300);
@@ -432,17 +448,21 @@ async function captureFrames(browser: Browser, url: string, loc: Locator, desk: 
         marks.open = sc.now(); await page.mouse.click(c.x, c.y); await page.waitForTimeout(1800);
         marks.close = sc.now(); await page.mouse.click(c.x, c.y); await page.waitForTimeout(1800);
       }
+      dbg(nameOf, 'clicked');
       marks.leave = sc.now();
       await page.mouse.move(2, 2, { steps: 10 });
       await page.waitForTimeout(1200);
+      dbg(nameOf, 'left');
       const after = await viewportRect(page);
+      dbg(nameOf, 'measured');
       const box = before && after ? { x: Math.min(before.x, after.x), y: Math.min(before.y, after.y), w: Math.max(before.x + before.w, after.x + after.w) - Math.min(before.x, after.x), h: Math.max(before.y + before.h, after.y + after.h) - Math.min(before.y, after.y) } : before;
       report[nameOf] = await sc.finish({ crop: cropOf(box), vp, extra: { description: `${t.click ? 'hover, click open, click close' : 'hover on, hold, off'}: target ${t.kind}${t.text ? ` "${scrub(t.text, [])}"` : ''}`, marksMs: marks, target: t.cid } });
     } catch (e: any) { errors.push(`[${nameOf}] ${e.message}`); } finally { await closeCtx(ctx); }
+    });
   }
 
   // loops: anything in the subtree that keeps moving with no input
-  {
+  await scenario('loop', async () => {
     const infinite = (desk.animations ?? []).filter((x: any) => x.timing?.iterations === 'Infinity');
     const ctx = await newCtx(browser, vp, 1);
     try {
@@ -472,7 +492,7 @@ async function captureFrames(browser: Browser, url: string, loc: Locator, desk: 
         }
       }
     } catch (e: any) { errors.push(`[frames loop] ${e.message}`); } finally { await closeCtx(ctx); }
-  }
+  });
   for (const [k, v] of Object.entries(report)) log(`  [${k}] ${v.frameCount} frames, motion ${v.firstMotionMs ?? '-'}->${v.lastMotionMs ?? '-'}ms`);
   fs.writeFileSync(path.join(FR, 'report.json'), JSON.stringify(report, null, 1));
   return report;

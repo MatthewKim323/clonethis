@@ -69,7 +69,7 @@ export async function measure(browser: Browser, url: string, loc: Locator, ref: 
   } finally { await closeCtx(ctx); }
 }
 
-export type TextRow = { text: string; ref: any; build: any | null; dx?: number; dy?: number; dw?: number; dh?: number; lines?: string; ok: boolean };
+export type TextRow = { text: string; ref: any; build: any | null; dx?: number; dy?: number; dw?: number; dh?: number; lines?: string; ok: boolean; note?: string };
 
 /** Pair reference text runs with build runs of the same text (nearest first), in document order. */
 export function matchTexts(refT: any[], buildT: any[], tol: number): { rows: TextRow[]; extra: any[] } {
@@ -82,14 +82,15 @@ export function matchTexts(refT: any[], buildT: any[], tol: number): { rows: Tex
     used.add(best);
     const b = buildT[best];
     const dx = +(b.x - r.x).toFixed(2), dy = +(b.y - r.y).toFixed(2), dw = +(b.w - r.w).toFixed(2), dh = +(b.h - r.h).toFixed(2);
-    const ok = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dw), Math.abs(dh)) <= tol && b.lines === r.lines;
-    rows.push({ text: r.text, ref: r, build: b, dx, dy, dw, dh, lines: b.lines === r.lines ? '' : `${r.lines}->${b.lines}`, ok });
+    // looping (mid-animation in both captures) = presence only; scrubbed (the words changed) = position + height only
+    const ok = r.loop ? true : r.scrubbed ? Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dh)) <= tol : Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dw), Math.abs(dh)) <= tol && b.lines === r.lines;
+    rows.push({ text: r.text, ref: r, build: b, dx, dy, dw, dh, lines: b.lines === r.lines ? '' : `${r.lines}->${b.lines}`, ok, note: r.loop ? 'loop' : r.scrubbed ? 'scrubbed' : undefined } as TextRow);
   }
   return { rows, extra: buildT.filter((_b, i) => !used.has(i)) };
 }
 
 export function matchMedia(refM: any[], buildM: any[], tol: number) {
-  const kinds = [...new Set([...refM, ...buildM].map((m) => m.kind))];
+  const kinds = [...new Set([...refM, ...buildM].map((m) => m.kind))].filter((k) => k !== 'loop');
   const rows: { kind: string; i: number; ref: any; build: any; ok: boolean; d?: string }[] = [];
   for (const k of kinds) {
     const R = refM.filter((m) => m.kind === k), B = buildM.filter((m) => m.kind === k);
@@ -158,7 +159,7 @@ export async function verifyCore(url: string, ref: string, opts: { loc: Locator;
       const media = matchMedia(r.media, m.media, opts.textTol);
       let pixels: any = null;
       if (shot && fs.existsSync(r.shot)) {
-        const mask = r.media.filter((x) => ['video', 'canvas', 'iframe'].includes(x.kind));
+        const mask = r.media.filter((x) => ['video', 'canvas', 'iframe', 'loop'].includes(x.kind));
         pixels = await pixelDiff(shot, r.shot, path.join(opts.out, 'diff', `${r.vp.name}.png`), mask);
         if (pixels.sizeDelta > 2) notes.push(`shot size differs by ${pixels.sizeDelta}px (2x): compared the overlapping area`);
       }
@@ -212,7 +213,7 @@ export async function runVerify(argv: string[]) {
  * not download), and the brief says so before anyone builds from it.
  */
 export async function selfCheck(ref: string) {
-  const srv = serveDir(ref);
+  const srv = await serveDir(ref);
   try {
     log('== snapshot self-check');
     const out = path.join(ref, 'snapshot', 'check');

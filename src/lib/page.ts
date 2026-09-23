@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from 'playwright';
 
-const LIB = fs.readFileSync(path.join(import.meta.dir, '..', 'page', 'ct.js'), 'utf8');
+const LIB = fs.readFileSync(path.join(import.meta.dirname, '..', 'page', 'ct.js'), 'utf8');
 
 export type Locator = { selector: string; nth?: number; text?: string; name?: string; tag?: string };
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -48,7 +48,8 @@ export async function rootRect(page: Page): Promise<Rect | null> {
     const el = document.querySelector('[data-ct-root]');
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height };
+    const q = (n: number) => Math.round(n * 100) / 100;
+    return { x: q(r.left + scrollX), y: q(r.top + scrollY), w: q(r.width), h: q(r.height) };
   });
 }
 
@@ -60,4 +61,19 @@ export async function viewportRect(page: Page): Promise<Rect | null> {
     const r = el.getBoundingClientRect();
     return { x: r.left, y: r.top, w: r.width, h: r.height };
   });
+}
+
+/** Regex sources for the origin tokens, for `rebrand` in the page (same matcher the blackout scanner uses). */
+let REBRAND: { sources: string[]; brand: string } | null = null;
+export function setRebrand(tokens: string[], brand: string, tokenRe: (t: string) => RegExp) {
+  REBRAND = tokens.length ? { sources: tokens.map((t) => tokenRe(t).source), brand } : null;
+}
+/** markRoot, then rewrite origin words inside the component to the brand (when a rebrand is set). */
+export async function markAndRebrand(page: Page, loc: Locator): Promise<Rect | null> {
+  const r = await markRoot(page, loc);
+  if (r && REBRAND) {
+    await page.evaluate(({ sources, brand }) => (window as any).__ct.rebrand(document.querySelector('[data-ct-root]'), sources, brand), REBRAND);
+    return rootRect(page);
+  }
+  return r;
 }

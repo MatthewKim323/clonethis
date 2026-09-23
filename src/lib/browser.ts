@@ -50,7 +50,8 @@ export async function launch(headless = true): Promise<Browser> {
  */
 export class BrowserPool {
   private b: Browser | null = null;
-  constructor(private headless = true) {}
+  private headless: boolean;
+  constructor(headless = true) { this.headless = headless; }
   async get(): Promise<Browser> {
     if (!this.b || !this.b.isConnected()) {
       if (this.b) log('  browser gone, relaunching');

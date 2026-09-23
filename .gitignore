@@ -4,3 +4,4 @@ node_modules/
 # extraction output when running inside this repo
 reference/
 test/out/
+test/fixtures/site/fonts/

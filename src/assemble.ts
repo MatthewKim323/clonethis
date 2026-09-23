@@ -34,7 +34,8 @@ export async function writeReference(g: Grabbed) {
     const dir = `capture/${d.vp.name}`;
     if (!d.found) { w(`${dir}/missing.json`, JSON.stringify({ found: false, error: d.error ?? 'not visible at this width' }, null, 1)); continue; }
     w(`${dir}/layout.json`, neutral(d.layout));
-    w(`${dir}/texts.json`, neutral(d.texts));
+    // a run whose words the blackout rewrote cannot keep the original glyph widths: flag it so verify checks position, not width
+    w(`${dir}/texts.json`, neutral((d.texts ?? []).map((t: any) => (clean(t.text) !== t.text ? { ...t, scrubbed: true } : t))));
     w(`${dir}/media.json`, neutral(d.media));
     w(`${dir}/context.json`, neutral({ ...d.context, heightFromContext: d.hfc, rootRect: d.rect }));
     w(`${dir}/interactive.json`, neutral(d.interactive));

@@ -1,5 +1,6 @@
 /**
- * CDP Page.startScreencast: every compositor frame with its swap timestamp. Frames can be cropped to the
+ * CDP Page.startScreencast: every compositor frame with its swap timestamp, as jpeg (png frames at 60fps flood
+ * the pipe to the browser; under bun that has wedged the connection). Frames can be cropped to the
  * component (plus a margin) on finish, so a scenario folder holds the component and nothing else.
  * Shared by `grab` (reference) and `frames` (build) so both timelines are recorded the same way.
  */
@@ -18,9 +19,11 @@ export class Screencast {
   private t0 = 0;
   private stopped = false;
   private writes: Promise<unknown>[] = [];
-  constructor(public dir: string) {
+  dir: string;
+  constructor(dir: string) {
+    this.dir = dir;
     fs.mkdirSync(dir, { recursive: true });
-    for (const f of fs.readdirSync(dir)) if (/\.(png|json)$/.test(f)) fs.unlinkSync(path.join(dir, f));
+    for (const f of fs.readdirSync(dir)) if (/\.(png|jpg|json)$/.test(f)) fs.unlinkSync(path.join(dir, f));
   }
   /** ms since start of the latest frame, a cheap "now" on the frame clock */
   now() { return this.frames.at(-1)?.t ?? 0; }
@@ -29,7 +32,7 @@ export class Screencast {
     this.cdp.on('Page.screencastFrame', (ev: any) => {
       if (!this.stopped) {
         const i = this.frames.length;
-        const file = `${String(i).padStart(5, '0')}.png`;
+        const file = `${String(i).padStart(5, '0')}.jpg`;
         this.frames.push({ i, t: Math.round((ev.metadata.timestamp - this.t0) * 1000), file, ts: ev.metadata.timestamp });
         this.writes.push(fs.promises.writeFile(path.join(this.dir, file), Buffer.from(ev.data, 'base64')));
         if (this.frames.length >= MAX_FRAMES) this.stop().catch(() => {});
@@ -37,7 +40,7 @@ export class Screencast {
       this.cdp.send('Page.screencastFrameAck', { sessionId: ev.sessionId }).catch(() => {});
     });
     this.t0 = Date.now() / 1000;
-    await this.cdp.send('Page.startScreencast', { format: 'png', everyNthFrame: 1, maxWidth: Math.round(vp.width * dsf), maxHeight: Math.round(vp.height * dsf) });
+    await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 90, everyNthFrame: 1, maxWidth: Math.round(vp.width * dsf), maxHeight: Math.round(vp.height * dsf) });
   }
   async stop() {
     if (this.stopped) return;
@@ -49,12 +52,16 @@ export class Screencast {
    * frames.json + motion-timeline.json. Returns the timeline summary.
    */
   async finish(opts: { crop?: Rect | null; vp: { width: number; height: number }; extra?: Record<string, unknown> }) {
+    const dbg = (m: string) => { if (process.env.CT_DEBUG) console.log('  [debug] screencast', m); };
     await this.stop();
+    dbg('stopped');
     await Promise.all(this.writes);
+    dbg('written');
     try { await this.cdp.detach(); } catch {}
+    dbg('detached');
     const sorted = [...this.frames].sort((a, b) => a.ts - b.ts);
     for (const f of sorted) fs.renameSync(path.join(this.dir, f.file), path.join(this.dir, 'tmp-' + f.file));
-    sorted.forEach((f, i) => { const nf = `${String(i).padStart(5, '0')}.png`; fs.renameSync(path.join(this.dir, 'tmp-' + f.file), path.join(this.dir, nf)); f.file = nf; f.i = i; });
+    sorted.forEach((f, i) => { const nf = `${String(i).padStart(5, '0')}.jpg`; fs.renameSync(path.join(this.dir, 'tmp-' + f.file), path.join(this.dir, nf)); f.file = nf; f.i = i; });
     this.frames = sorted;
     let cropPx: { left: number; top: number; width: number; height: number } | null = null;
     if (opts.crop && sorted.length) {
@@ -69,7 +76,7 @@ export class Screencast {
         try {
           const m = await sharp(p).metadata();
           if (m.width! < left + width || m.height! < top + height) continue;
-          const buf = await sharp(p).extract(cropPx).png().toBuffer();
+          const buf = await sharp(p).extract(cropPx).jpeg({ quality: 92 }).toBuffer();
           fs.writeFileSync(p, buf);
         } catch {}
       }
@@ -84,13 +91,14 @@ export class Screencast {
 
 /** Per-frame changed-pixel fraction vs the previous frame; merged motion ranges in ms. */
 export async function motionTimeline(dir: string, frames: { i: number; t: number; file: string }[]) {
-  const PIX = 12, THRESH = 0.0005, W = 360;
+  // compare at (up to) 720px wide, aspect kept: a small looping badge inside a big crop must still register
+  const PIX = 12, THRESH = 0.0001, W = 720;
   let prev: Buffer | null = null;
   const rows: { i: number; t: number; changed: number; motion: boolean }[] = [];
   for (const f of frames) {
     let changed = 0;
     try {
-      const raw = await sharp(path.join(dir, f.file)).resize({ width: W, height: W, fit: 'fill' }).removeAlpha().raw().toBuffer();
+      const raw = await sharp(path.join(dir, f.file)).resize({ width: W, withoutEnlargement: true }).removeAlpha().raw().toBuffer();
       if (prev && prev.length === raw.length) {
         let n = 0;
         for (let k = 0; k < raw.length; k += 3) if (Math.abs(raw[k] - prev[k]) > PIX || Math.abs(raw[k + 1] - prev[k + 1]) > PIX || Math.abs(raw[k + 2] - prev[k + 2]) > PIX) n++;
@@ -107,7 +115,7 @@ export async function motionTimeline(dir: string, frames: { i: number; t: number
     if (last && r.t - last.endMs <= 120) { last.endMs = r.t; last.frames++; } else ranges.push({ startMs: r.t, endMs: r.t, frames: 1 });
   }
   return {
-    method: `frames resized to ${W}x${W}, a pixel changed if any channel moved > ${PIX}; a frame is motion if > ${THRESH * 100}% of pixels changed`,
+    method: `frames at most ${W}px wide, a pixel changed if any channel moved > ${PIX}; a frame is motion if > ${THRESH * 100}% of pixels changed`,
     summary: { firstMotionMs: moving[0]?.t ?? null, lastMotionMs: moving.at(-1)?.t ?? null, motionFrames: moving.length, totalFrames: rows.length, ranges },
     frames: rows,
   };

@@ -45,6 +45,7 @@
 
   /** A selector for el that survives a fresh load at another width: {selector, nth} where nth indexes the visible matches. */
   function selectorFor(el) {
+    if (el === document.body || el === document.documentElement) return { selector: el.tagName.toLowerCase(), nth: 0, count: 1 };
     const tries = [];
     const tag = el.tagName.toLowerCase();
     if (goodId(el.id)) tries.push('#' + esc(el.id));
@@ -141,7 +142,7 @@
     const out = [];
     for (const el of [...hits].slice(0, max)) {
       const chain = [];
-      for (let a = el, d = 0; a && a !== document.documentElement && d < 10; a = a.parentElement, d++) {
+      for (let a = el, d = 0; a && a !== document.body && a !== document.documentElement && d < 10; a = a.parentElement, d++) {
         if (!visible(a)) continue;
         chain.push({ up: d, ...describe(a), ...selectorFor(a) });
       }
@@ -220,7 +221,9 @@
       const r = range.getBoundingClientRect();
       if (!r.width || !r.height) continue;
       const lines = Array.from(range.getClientRects()).filter((x) => x.width > 0).length;
-      out.push({ text: t.slice(0, 200), x: r2(r.left - R.left), y: r2(r.top - R.top), w: r2(r.width), h: r2(r.height), lines, font: `${pcs.fontWeight} ${pcs.fontSize}/${pcs.lineHeight} ${pcs.fontFamily.split(',')[0].replace(/["']/g, '')}`, color: pcs.color, cid: cid(p) || undefined });
+      let loop = false;
+      for (let a = p; a && a !== root.parentElement; a = a.parentElement) if (looping(a).size) { loop = true; break; }
+      out.push({ ...(loop ? { loop: true } : {}), text: t.slice(0, 200), x: r2(r.left - R.left), y: r2(r.top - R.top), w: r2(r.width), h: r2(r.height), lines, font: `${pcs.fontWeight} ${pcs.fontSize}/${pcs.lineHeight} ${pcs.fontFamily.split(',')[0].replace(/["']/g, '')}`, color: pcs.color, cid: cid(p) || undefined });
     }
     return out;
   }
@@ -235,6 +238,13 @@
       const r = e.getBoundingClientRect();
       out.push({ kind: e.tagName.toLowerCase(), x: r2(r.left - R.left), y: r2(r.top - R.top), w: r2(r.width), h: r2(r.height), cid: cid(e) || undefined });
     }
+    // things an infinite animation keeps moving: masked in pixel diffs, not held to 1px
+    for (const e of [root, ...root.querySelectorAll('*')]) {
+      if (e === root || !visible(e) || !looping(e).size) continue;
+      const r = e.getBoundingClientRect();
+      const pad = Math.max(r.width, r.height) * 0.15;
+      out.push({ kind: 'loop', x: r2(r.left - R.left - pad), y: r2(r.top - R.top - pad), w: r2(r.width + 2 * pad), h: r2(r.height + 2 * pad), cid: cid(e) || undefined });
+    }
     return out;
   }
 
@@ -244,6 +254,16 @@
     const pcs = getComputedStyle(p);
     const inherited = {};
     for (const k of INHERITED) inherited[k] = pcs[k];
+    // computed line-height is resolved to px, but a unitless one inherits as a ratio: probe which it is
+    try {
+      const probe = document.createElement('span');
+      probe.style.cssText = 'font-size:100px;position:absolute;visibility:hidden';
+      p.appendChild(probe);
+      const lh = getComputedStyle(probe).lineHeight;
+      probe.remove();
+      if (lh === 'normal') inherited.lineHeight = 'normal';
+      else if (Math.abs(parseFloat(lh) - parseFloat(pcs.lineHeight)) > 0.01) inherited.lineHeight = String(Math.round(parseFloat(lh) * 1000) / 100000);
+    } catch {}
     let backdrop = null;
     for (let a = root; a; a = a.parentElement) {
       const cs = getComputedStyle(a);
@@ -351,16 +371,31 @@
   }
 
   /** Computed state of every element in the subtree, for before / after diffs. Pseudo elements included. */
+  /** Properties an infinite animation on el keeps moving: they are the loop, not the state, so diffs skip them. */
+  function looping(el) {
+    const out = new Set();
+    let list = [];
+    try { list = el.getAnimations(); } catch {}
+    for (const a of list) {
+      const t = a.effect && a.effect.getTiming ? a.effect.getTiming() : null;
+      if (!t || t.iterations !== Infinity) continue;
+      if (a.transitionProperty) continue;
+      try { for (const k of a.effect.getKeyframes()) for (const p of Object.keys(k)) out.add(p === 'cssFloat' ? 'float' : p); } catch {}
+      if (out.has('transform')) { out.add('scale'); out.add('rotate'); out.add('translate'); }
+    }
+    return out;
+  }
   function snap(root) {
     const m = {};
-    const one = (key, cs) => { const o = {}; for (const k of STATE_PROPS) o[k] = cs[k]; m[key] = o; };
+    const one = (key, cs, skip) => { const o = {}; for (const k of STATE_PROPS) o[k] = skip && skip.has(k) ? '(loop)' : cs[k]; m[key] = o; };
     for (const el of [root, ...root.querySelectorAll('*')]) {
       const id = cid(el);
       if (!id) continue;
-      one(id, getComputedStyle(el));
+      const loop = looping(el);
+      one(id, getComputedStyle(el), loop);
       for (const p of ['::before', '::after']) { const cs = getComputedStyle(el, p); if (cs.content && cs.content !== 'none' && cs.content !== 'normal') one(id + p, cs); }
       const r = el.getBoundingClientRect();
-      m[id].__rect = `${r2(r.width)}x${r2(r.height)}`;
+      m[id].__rect = loop.size ? '(loop)' : `${r2(r.width)}x${r2(r.height)}`;
     }
     return m;
   }
@@ -471,6 +506,24 @@
     return c.outerHTML;
   }
 
+  /**
+   * Origin blackout applied to the live component before anything is measured: text nodes and the attributes
+   * people read (alt, aria-label, title, placeholder, value) get the brand in place of origin words, keeping
+   * case shape. The reference then shows the component as it will read in the clone, and its screenshots
+   * stop saying where it came from.
+   */
+  function rebrand(root, sources, brand) {
+    if (!root || !sources.length) return 0;
+    const res = sources.map((s) => new RegExp(s, 'g'));
+    const shape = (m) => (m.length > 1 && m === m.toUpperCase() ? brand.toUpperCase() : m[0] === m[0].toUpperCase() ? brand[0].toUpperCase() + brand.slice(1) : brand.toLowerCase());
+    const fix = (v) => { let o = v; for (const re of res) o = o.replace(re, (m) => shape(m)); return o; };
+    let n = 0;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) { const v = t.nodeValue || ''; const w = fix(v); if (w !== v) { t.nodeValue = w; n++; } }
+    for (const e of [root, ...root.querySelectorAll('*')]) for (const k of ['alt', 'aria-label', 'title', 'placeholder', 'value']) { const v = e.getAttribute(k); if (v) { const w = fix(v); if (w !== v) { e.setAttribute(k, w); n++; } } }
+    return n;
+  }
+
   function scrollToRoot(root, where = 'center') {
     const r = root.getBoundingClientRect();
     const y = r.top + scrollY;
@@ -479,5 +532,5 @@
     return scrollY;
   }
 
-  window.__ct = { visible, visibleMatches, selectorFor, resolve, describe, candidates, tag, layout, texts, media, context, heightFromContext, pin, interactive, snap, diffSnap, transitionsOf, animations, refs, symbols, hideOverlays, restoreOverlays, html, scrollToRoot, pageRect, kebab };
+  window.__ct = { rebrand, visible, visibleMatches, selectorFor, resolve, describe, candidates, tag, layout, texts, media, context, heightFromContext, pin, interactive, snap, diffSnap, transitionsOf, animations, refs, symbols, hideOverlays, restoreOverlays, html, scrollToRoot, pageRect, kebab };
 })();
