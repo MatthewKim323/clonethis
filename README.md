@@ -85,7 +85,7 @@ What comes out is yours. The live component is rebranded in the page before anyt
 
 - `bun run test` / `node test/e2e.ts`: a local fixture (a pricing card with web fonts, a looping badge, hover / press / focus transitions, a disclosure, ancestor-qualified rules, escaped utility classes, a phone breakpoint). The snapshot passes the gate at all four widths; states, fonts, keyframes and blackout are checked.
 - The same card built by hand into a fresh Next.js app from the reference alone: `verify` PASS at 1440 / 1024 / 810 / 390, `states` 3 of 3 targets matching. Changing one font size from 13px to 14px fails it and `compare` names the runs and the font.
-- Live: a production Next.js site's sticky header (144 stylesheets, 6.4k rules) and a Framer pricing card whose height comes from its grid row. Both snapshots pass the gate at every width.
+- Live: a production Next.js site's sticky header (144 stylesheets, 6.4k rules), a Framer pricing card whose height comes from its grid row, and a Tailwind v4 button (cascade layers, native nesting, `@property`, a separate mobile variant). All three snapshots pass the gate at every width.
 
 ## Limits
 
