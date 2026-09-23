@@ -32,7 +32,7 @@ const dbg = (...x: unknown[]) => { if (process.env.CT_DEBUG) log('  [debug]', ..
 export type VpData = {
   vp: Viewport; found: boolean; rect?: Rect; count?: number;
   layout?: any[]; texts?: any[]; media?: any[]; context?: any; hfc?: any; interactive?: any[]; animations?: any[];
-  refs?: { urls: string[]; families: string[] }; symbols?: { id: string; html: string }[]; html?: string;
+  refs?: { urls: string[]; families: string[]; faces?: [string, string, string][]; chars?: string }; symbols?: { id: string; html: string }[]; html?: string;
   keys?: { classes: string[]; ids: string[]; tags: string[]; attrs: string[] }; matches?: Record<number, string[]>;
   error?: string;
 };
@@ -188,7 +188,7 @@ export async function runGrab(argv: string[]) {
   const usedVars = new Set(kept.flatMap((r) => varRefs(r.body)));
   const atoms = allRules.filter((r): r is Rule & { kind: 'atom'; sheet: number; base: string } => r.kind === 'atom');
   const keyframes = atoms.filter((r) => /keyframes$/.test(r.name) && animNames.has(r.prelude.replace(/["']/g, '')));
-  const fontFaces = atoms.filter((r) => r.name === 'font-face' && families.has((fontFaceFamily(r.body) ?? '').toLowerCase()));
+  const fontFaces = pickFontFaces(atoms.filter((r) => r.name === 'font-face' && families.has((fontFaceFamily(r.body) ?? '').toLowerCase())), found);
   const properties = atoms.filter((r) => r.name === 'property' && usedVars.has(r.prelude));
   // root variables in scope, per width, resolved on the component root
   const varNames = [...usedVars];
@@ -573,4 +573,50 @@ async function detectStack(page: Page): Promise<Stack> {
     if (s.tailwind) s.notes.push('Utility classes: css/used.css already holds exactly the utilities the component uses.');
     return s as Stack;
   });
+}
+
+// ---------------------------------------------------------------- font faces
+const WEIGHTS: Record<string, number> = { normal: 400, bold: 700, lighter: 300, bolder: 700 };
+const weightRange = (body: string): [number, number] => {
+  const m = body.match(/font-weight\s*:\s*([^;]+)/);
+  if (!m) return [400, 400];
+  const parts = m[1].trim().split(/\s+/).map((w) => WEIGHTS[w] ?? Number(w)).filter((n) => Number.isFinite(n));
+  return parts.length ? [parts[0], parts[parts.length - 1]] : [400, 400];
+};
+const styleOf = (body: string) => (body.match(/font-style\s*:\s*([a-z-]+)/)?.[1] ?? 'normal');
+/** unicode-range as [lo, hi] pairs; null = the face covers everything */
+const unicodeRanges = (body: string): [number, number][] | null => {
+  const m = body.match(/unicode-range\s*:\s*([^;]+)/i);
+  if (!m) return null;
+  return m[1].split(',').map((r) => r.trim().replace(/^u\+/i, '')).map((r) => {
+    if (r.includes('?')) return [parseInt(r.replace(/\?/g, '0'), 16), parseInt(r.replace(/\?/g, 'F'), 16)] as [number, number];
+    const [a, b] = r.split('-');
+    return [parseInt(a, 16), parseInt(b ?? a, 16)] as [number, number];
+  });
+};
+
+/**
+ * Keep the @font-face rules that can render this component: same family, a weight range that contains a
+ * weight it uses (or the nearest ones on either side when none does, as the browser would fall back),
+ * the style it uses, and a unicode-range covering at least one character it draws.
+ */
+function pickFontFaces<T extends { body: string }>(faces: T[], found: VpData[]): T[] {
+  const wanted = found.flatMap((d) => d.refs?.faces ?? []);
+  const chars = [...new Set(found.map((d) => d.refs?.chars ?? '').join(''))].map((c) => c.codePointAt(0)!);
+  if (!wanted.length) return faces;
+  const keep = new Set<T>();
+  const coversText = (f: T) => { const r = unicodeRanges(f.body); return !r || !chars.length || chars.some((c) => r.some(([lo, hi]) => c >= lo && c <= hi)); };
+  for (const [family, w, style] of wanted) {
+    const weight = Number(w) || 400;
+    const fam = faces.filter((f) => (fontFaceFamily(f.body) ?? '').toLowerCase() === family && coversText(f));
+    if (!fam.length) continue;
+    const st = fam.filter((f) => styleOf(f.body) === style);
+    const pool = st.length ? st : fam;
+    const exact = pool.filter((f) => { const [lo, hi] = weightRange(f.body); return weight >= lo && weight <= hi; });
+    if (exact.length) { exact.forEach((f) => keep.add(f)); continue; }
+    const below = pool.filter((f) => weightRange(f.body)[1] < weight).sort((a, b) => weightRange(b.body)[1] - weightRange(a.body)[1])[0];
+    const above = pool.filter((f) => weightRange(f.body)[0] > weight).sort((a, b) => weightRange(a.body)[0] - weightRange(b.body)[0])[0];
+    for (const f of [below, above]) if (f) keep.add(f);
+  }
+  return faces.filter((f) => keep.has(f));
 }

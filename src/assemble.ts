@@ -40,10 +40,10 @@ export async function writeReference(g: Grabbed) {
     w(`${dir}/context.json`, neutral({ ...d.context, heightFromContext: d.hfc, rootRect: d.rect }));
     w(`${dir}/interactive.json`, neutral(d.interactive));
     w(`${dir}/animations.json`, neutral(d.animations));
-    w(`dom/${d.vp.name}.html`, clean(localizeHtml(d.html!, g.local(REF), g.url)));
+    w(`dom/${d.vp.name}.html`, clean(localizeHtml(d.html!, g.local(REF), g.url)).replace(/\sdata-ct-root(="")?/, ''));
   }
   const desk = found[0];
-  const domHtml = clean(localizeHtml(desk.html!, g.local(REF), g.url));
+  const domHtml = clean(localizeHtml(desk.html!, g.local(REF), g.url)).replace(/\sdata-ct-root(="")?/, '');
   w('dom/component.html', domHtml);
   const symbols = dedupe(found.flatMap((d) => d.symbols ?? []), (s) => s.id);
   if (symbols.length) w('dom/symbols.svg', clean(`<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true"><defs>\n${symbols.map((s) => s.html).join('\n')}\n</defs></svg>\n`));

@@ -387,7 +387,13 @@
   }
   function snap(root) {
     const m = {};
-    const one = (key, cs, skip) => { const o = {}; for (const k of STATE_PROPS) o[k] = skip && skip.has(k) ? '(loop)' : cs[k]; m[key] = o; };
+    const one = (key, cs, skip) => {
+      const o = {};
+      for (const k of STATE_PROPS) o[k] = skip && skip.has(k) ? '(loop)' : cs[k];
+      // an outline that is not drawn has no color worth diffing
+      if (cs.outlineStyle === 'none') { o.outline = 'none'; o.outlineColor = 'none'; o.outlineOffset = 'none'; }
+      m[key] = o;
+    };
     for (const el of [root, ...root.querySelectorAll('*')]) {
       const id = cid(el);
       if (!id) continue;
@@ -456,7 +462,20 @@
     }
     const families = new Set();
     for (const f of fonts) for (const part of (f || '').split(',')) { const n = part.trim().replace(/^["']|["']$/g, ''); if (n) families.add(n); }
-    return { urls: [...urls].filter((u) => /^https?:/.test(u)), families: [...families] };
+    // what faces are actually asked for (family x weight x style) and which characters they draw, so the
+    // grab keeps the @font-face rules that can apply instead of every weight and subset of a family
+    const faces = new Set();
+    let chars = '';
+    for (const el of els) {
+      const add = (cs, text) => {
+        if (!text) return;
+        chars += text;
+        for (const part of (cs.fontFamily || '').split(',')) { const n = part.trim().replace(/^["']|["']$/g, ''); if (n) faces.add(JSON.stringify([n.toLowerCase(), cs.fontWeight, cs.fontStyle])); }
+      };
+      add(getComputedStyle(el), ownText(el) || el.getAttribute('placeholder') || (el.tagName === 'INPUT' ? el.value : ''));
+      for (const ps of ['::before', '::after']) { const c = getComputedStyle(el, ps); if (c.content && c.content !== 'none' && c.content !== 'normal') add(c, c.content.replace(/^["']|["']$/g, '')); }
+    }
+    return { urls: [...urls].filter((u) => /^https?:/.test(u)), families: [...families], faces: [...faces].map((f) => JSON.parse(f)), chars: [...new Set(chars)].join('') };
   }
 
   /** In-document svg symbols the subtree references with <use href="#id">: they live outside the component, so bring them along. */
@@ -500,6 +519,10 @@
   function html(root) {
     const c = root.cloneNode(true);
     for (const s of c.querySelectorAll('script, noscript, template[shadowroot]')) s.remove();
+    for (const e of [c, ...c.querySelectorAll('*')]) {
+      e.removeAttribute('data-ct-prepin');
+      if (e.getAttribute('style') === '') e.removeAttribute('style');
+    }
     const liveImgs = [root, ...root.querySelectorAll('*')].filter((e) => e.tagName === 'IMG');
     const cloneImgs = [c, ...c.querySelectorAll('*')].filter((e) => e.tagName === 'IMG');
     cloneImgs.forEach((img, i) => { const live = liveImgs[i]; if (live && live.currentSrc) img.setAttribute('data-ct-current', live.currentSrc); img.removeAttribute('loading'); });
