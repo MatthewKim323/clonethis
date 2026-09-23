@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Args, usage } from '../lib/args.ts';
 import { launch, newCtx, load, reveal, closeCtx, viewportByWidth, sleep, log } from '../lib/browser.ts';
-import { ct, markRoot, viewportRect, type Locator, type Rect } from '../lib/page.ts';
+import { ct, markRoot, viewportRect, parkMouse, type Locator, type Rect } from '../lib/page.ts';
 import { statesPass } from '../lib/states.ts';
 import { Screencast, contactSheet } from '../lib/screencast.ts';
 import { loadRef, pixelDiff } from './verify.ts';
@@ -141,7 +141,7 @@ export async function runFrames(argv: string[]) {
       await pin();
       await ct(page, 'tag', '$root');
       await page.evaluate(() => (window as any).__ct.scrollToRoot(document.querySelector('[data-ct-root]'), 'center'));
-      await page.mouse.move(2, 2);
+      await parkMouse(page);
       await page.waitForTimeout(900);
       const vr = await viewportRect(page);
       const sc = new Screencast(outDir);
@@ -166,7 +166,7 @@ export async function runFrames(argv: string[]) {
         await page.mouse.move(c.x, c.y, { steps: 10 });
         await page.waitForTimeout(1400);
         if (scenario === 'toggle') { await page.mouse.click(c.x, c.y); await page.waitForTimeout(1800); await page.mouse.click(c.x, c.y); await page.waitForTimeout(1800); }
-        await page.mouse.move(2, 2, { steps: 10 });
+        await parkMouse(page);
         await page.waitForTimeout(1200);
         const after = await viewportRect(page);
         const box = vr && after ? { x: Math.min(vr.x, after.x), y: Math.min(vr.y, after.y), w: Math.max(vr.x + vr.w, after.x + after.w) - Math.min(vr.x, after.x), h: Math.max(vr.y + vr.h, after.y + after.h) - Math.min(vr.y, after.y) } : vr;

@@ -77,3 +77,12 @@ export async function markAndRebrand(page: Page, loc: Locator): Promise<Rect | n
   }
   return r;
 }
+
+/** Move the pointer to a viewport corner that is not over the component, so no shot is taken mid-hover. */
+export async function parkMouse(page: Page) {
+  const vp = page.viewportSize() ?? { width: 1440, height: 900 };
+  const r = await viewportRect(page);
+  const corners = [[vp.width - 2, vp.height - 2], [2, vp.height - 2], [vp.width - 2, 2], [2, 2]];
+  const free = corners.find(([x, y]) => !r || x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) ?? corners[0];
+  await page.mouse.move(free[0], free[1]);
+}

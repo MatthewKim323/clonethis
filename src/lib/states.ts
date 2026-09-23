@@ -6,14 +6,14 @@
  */
 import path from 'node:path';
 import type { Page } from 'playwright';
-import { ct } from './page.ts';
+import { ct, parkMouse } from './page.ts';
 import { shootRoot } from './shoot.ts';
 import { log } from './browser.ts';
 
 export async function statesPass(page: Page, vp: { width: number; height: number }, dir: string, out: { targets: any[] }, opts: { max?: number; targets?: any[]; shotPrefix?: string; dsf?: number; quiet?: boolean }) {
   const dsf = opts.dsf ?? 2;
   const targets = opts.targets ?? (await ct<any[]>(page, 'interactive', '$root', opts.max ?? 8));
-  const idle = async () => { await page.mouse.move(2, 2); await page.waitForTimeout(900); };
+  const idle = async () => { await parkMouse(page); await page.waitForTimeout(900); };
   await idle();
   const base = await ct<any>(page, 'snap', '$root');
   await shootRoot(page, path.join(dir, 'base.png'), { vp, dsf, hide: false, settleMs: 200, noScroll: true });
@@ -55,7 +55,7 @@ export async function statesPass(page: Page, vp: { width: number; height: number
         await page.waitForTimeout(250);
         rec.press = await record(`${tag}-press`, t.cid);
         // leave before releasing so no click fires
-        await page.mouse.move(2, 2, { steps: 4 });
+        await parkMouse(page);
         await page.mouse.up();
       }
       await idle();

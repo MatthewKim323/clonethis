@@ -101,13 +101,15 @@
     const pick = (list) => {
       if (!list || !list.length) return null;
       let l = list;
-      if (loc.text) { const t = l.filter((e) => (e.textContent || '').replace(/\s+/g, ' ').includes(loc.text)); if (t.length) l = t; }
+      if (loc.text) l = l.filter((e) => (e.innerText || e.textContent || '').replace(/\s+/g, ' ').includes(loc.text));
+      if (!l.length) return null;
       return l[Math.min(loc.nth || 0, l.length - 1)];
     };
     let el = pick(visibleMatches(loc.selector));
     if (!el && loc.name) el = pick(visibleMatches(attrSel('data-framer-name', loc.name)));
-    if (!el && loc.text) {
-      const all = Array.from(document.querySelectorAll(loc.tag || '*')).filter((e) => visible(e) && (e.textContent || '').replace(/\s+/g, ' ').includes(loc.text));
+    // last resort, for selectors that do not survive a breakpoint swap: same tag, same text, same layer name
+    if (!el && loc.text && loc.tag) {
+      const all = Array.from(document.querySelectorAll(loc.tag)).filter((e) => visible(e) && (!loc.name || e.getAttribute('data-framer-name') === loc.name) && (e.innerText || e.textContent || '').replace(/\s+/g, ' ').includes(loc.text));
       // the smallest one whose size class matches is the best guess
       all.sort((a, b) => a.getBoundingClientRect().height - b.getBoundingClientRect().height);
       el = all[0] || null;

@@ -22,7 +22,7 @@ import sharp from 'sharp';
 import type { Browser } from 'playwright';
 import { Args, usage } from '../lib/args.ts';
 import { launch, newCtx, load, reveal, closeCtx, viewportByWidth, VIEWPORTS, log, type Viewport } from '../lib/browser.ts';
-import { ct, markRoot, rootRect, type Locator } from '../lib/page.ts';
+import { ct, markRoot, rootRect, parkMouse, type Locator } from '../lib/page.ts';
 import { shootRoot, settleMedia } from '../lib/shoot.ts';
 import { serveDir } from '../lib/serve.ts';
 
@@ -54,6 +54,7 @@ export async function measure(browser: Browser, url: string, loc: Locator, ref: 
     await reveal(page);
     if (!(await markRoot(page, loc))) return { found: false, texts: [], media: [], errors };
     await page.evaluate(() => (window as any).__ct.scrollToRoot(document.querySelector('[data-ct-root]'), 'center'));
+    await parkMouse(page);
     await page.waitForTimeout(500);
     await settleMedia(page);
     const u = (await rootRect(page))!;

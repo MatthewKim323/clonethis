@@ -17,6 +17,7 @@ function stripComments(css: string) {
   const n = css.length;
   while (i < n) {
     const c = css[i];
+    if (c === '\\') { out += css.slice(i, i + 2); i += 2; continue; }   // escaped char outside a string (`.content-\[\'\'\]`)
     if (c === '"' || c === "'") {
       const q = c;
       let j = i + 1;
@@ -36,6 +37,7 @@ function closeOf(css: string, open: number) {
   let depth = 0;
   for (let i = open; i < css.length; i++) {
     const c = css[i];
+    if (c === '\\') { i++; continue; }
     if (c === '"' || c === "'") { const q = c; i++; while (i < css.length && css[i] !== q) { if (css[i] === '\\') i++; i++; } continue; }
     if (c === '{') depth++;
     else if (c === '}') { depth--; if (depth === 0) return i; }
@@ -48,6 +50,7 @@ function nextStop(css: string, i: number): { at: number; ch: string } {
   let paren = 0;
   for (; i < css.length; i++) {
     const c = css[i];
+    if (c === '\\') { i++; continue; }
     if (c === '"' || c === "'") { const q = c; i++; while (i < css.length && css[i] !== q) { if (css[i] === '\\') i++; i++; } continue; }
     if (c === '(') paren++;
     else if (c === ')') paren = Math.max(0, paren - 1);

@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Args, usage } from '../lib/args.ts';
 import { launch, newCtx, load, reveal, viewportByWidth, closeCtx, log, VIEWPORTS } from '../lib/browser.ts';
-import { ct, markRoot, type Locator } from '../lib/page.ts';
+import { ct, markRoot, parkMouse, type Locator } from '../lib/page.ts';
 import { shootRoot, settleMedia } from '../lib/shoot.ts';
 import { loadRef, measure, matchTexts, matchMedia } from './verify.ts';
 import { tokensFor, scrub } from '../lib/anon.ts';
@@ -41,6 +41,7 @@ export async function runShot(argv: string[]) {
     await reveal(page);
     if (!(await markRoot(page, locOf(a)))) usage(`component not found (${locOf(a).selector}). Mark its root with data-clone-root or pass --select.`);
     await page.evaluate(() => (window as any).__ct.scrollToRoot(document.querySelector('[data-ct-root]'), 'center'));
+    await parkMouse(page);
     await page.waitForTimeout(400);
     await settleMedia(page);
     if (ref) await ct(page, 'pin', '$root', ref.root.w, ref.heightFromContext ? ref.root.h : null);

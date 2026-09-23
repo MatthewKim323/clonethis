@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { request, type Browser, type Page } from 'playwright';
 import { Args, usage } from './lib/args.ts';
 import { VIEWPORTS, UA, newCtx, load, reveal, log, closeCtx, BrowserPool, guard, sleep, launch, withTimeout, type Viewport } from './lib/browser.ts';
-import { ct, markAndRebrand as markRoot, setRebrand, viewportRect, type Locator, type Rect } from './lib/page.ts';
+import { ct, markAndRebrand as markRoot, setRebrand, viewportRect, parkMouse, type Locator, type Rect } from './lib/page.ts';
 import { shootRoot, settleMedia } from './lib/shoot.ts';
 import { Screencast } from './lib/screencast.ts';
 import { statesPass } from './lib/states.ts';
@@ -100,6 +100,9 @@ export async function runGrab(argv: string[]) {
   });
   const locator: Locator = a.str('select') ? { ...loc0, tag: canon.tag, name: canon.name } : { selector: canon.selector, nth: canon.nth, tag: canon.tag, name: canon.name };
   if (!a.str('select') && canon.count > 1 && canon.text && (canon.nthText ?? -1) >= 0) { locator.text = canon.text; locator.nth = canon.nthText; }
+  // a selector unique at one width can match something else at another (a desktop-only button and a mobile one
+  // sharing a class): carry the text too, so a width where the component is not rendered reads as missing
+  else if (canon.count === 1 && canon.text && canon.text.length <= 40 && !locator.text) locator.text = canon.text;
 
   const stack = await detectStack(fpage);
   const fullHtml = await fpage.content();
@@ -180,7 +183,9 @@ export async function runGrab(argv: string[]) {
     if (!hit.length) return;
     const matches: Record<string, string[]> = {};
     for (const p of hit) for (const [vpn, cids] of Object.entries(matchedAt.get(p.t)!)) matches[vpn] = [...new Set([...(matches[vpn] ?? []), ...cids])];
-    kept.push({ ...(r as StyleRule & { sheet: number; base: string }), selector: hit.map((p) => p.part).join(', '), states: [...new Set(hit.flatMap((p) => stateOf(p.part)))], matches });
+    // native nesting (Tailwind v4 and friends): `&:hover { ... }` inside the body is a state too
+    const nested = [...(r as StyleRule).body.matchAll(/&([^{};]*)\{/g)].flatMap((m) => stateOf(m[1]));
+    kept.push({ ...(r as StyleRule & { sheet: number; base: string }), selector: hit.map((p) => p.part).join(', '), states: [...new Set([...hit.flatMap((p) => stateOf(p.part)), ...nested])], matches });
   });
   // what those rules pull in: keyframes, fonts, @property
   const families = new Set(found.flatMap((d) => d.refs?.families ?? []).map((f) => f.toLowerCase()));
@@ -247,6 +252,7 @@ async function captureViewport(browser: Browser, url: string, loc: Locator, vp: 
     const rect = await markRoot(page, loc);
     if (!rect) { log(`  not visible at ${vp.width}px`); return { vp, found: false }; }
     await page.evaluate(() => (window as any).__ct.scrollToRoot(document.querySelector('[data-ct-root]'), 'center'));
+    await parkMouse(page);
     await page.waitForTimeout(900);
     await settleMedia(page);
     const count = await ct<number>(page, 'tag', '$root');
@@ -431,7 +437,7 @@ export async function captureFrames(_shared: Browser, url: string, loc: Locator,
       if (!(await markRoot(page, loc))) return;
       await ct(page, 'tag', '$root');
       await page.evaluate(() => (window as any).__ct.scrollToRoot(document.querySelector('[data-ct-root]'), 'center'));
-      await page.mouse.move(2, 2);
+      await parkMouse(page);
       await page.waitForTimeout(900);
       const c = await page.evaluate((cid) => { const e = document.querySelector(`[data-ct-id="${cid}"]`); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, t.target ?? t.cid);
       if (!c) return;
@@ -450,7 +456,7 @@ export async function captureFrames(_shared: Browser, url: string, loc: Locator,
       }
       dbg(nameOf, 'clicked');
       marks.leave = sc.now();
-      await page.mouse.move(2, 2, { steps: 10 });
+      await parkMouse(page);
       await page.waitForTimeout(1200);
       dbg(nameOf, 'left');
       const after = await viewportRect(page);
@@ -471,7 +477,7 @@ export async function captureFrames(_shared: Browser, url: string, loc: Locator,
       await reveal(page);
       if (await markRoot(page, loc)) {
         await page.evaluate(() => (window as any).__ct.scrollToRoot(document.querySelector('[data-ct-root]'), 'center'));
-        await page.mouse.move(2, 2);
+        await parkMouse(page);
         await page.waitForTimeout(1500);
         const moving = await page.evaluate(async () => {
           const root = document.querySelector('[data-ct-root]')!;
