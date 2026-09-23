@@ -4,12 +4,15 @@
  *
  * choose it
  *   find <url> "<query>"              hits for a selector / text / layer name, with ancestor chains + outlined shots
+ *   find <url> --like <shot.png>      the elements that look like a screenshot of it, at every width
  *   pick <url>                        point at it in a real window ([ ] to change level, click to take it)
  *
  * grab it (reference/<name>/)
- *   grab <url> --select <css> [--nth N] | --name <layer> | --text "<text>" [--up N]
+ *   grab <url> --select <css> [--nth N] | --name <layer> | --text "<text>" [--up N] | --like <shot.png>
  *        [--as name] [--brand Name] [--tokens a,b] [--viewports 1440,1024,810,390] [--headless] [--no-states] [--no-frames]
  *                                    subtree + used css + fonts + assets + states + frames + snapshot + self-check + REBUILD.md
+ *   grab-image <shot.png> [<shot-390.png>] --as name [--vp 1440,390] [--dsf 2]
+ *                                    no url: the screenshot is the reference (size, OCR text, palette, row bands)
  *   rip <ref>                         (Framer) module motion windows focused on the component
  *   brief <ref>                       (re)write REBUILD.md
  *   init <project> [--ref reference/<name>]   CONVENTIONS.md + GOAL.md for this project's stack
@@ -42,6 +45,7 @@ async function main() {
     case 'find': return (await import('./rig/find.ts')).runFind(rest);
     case 'pick': return (await import('./rig/find.ts')).runPick(rest);
     case 'grab': case 'clone': return (await import('./grab.ts')).runGrab(rest);
+    case 'grab-image': case 'image': return (await import('./grabimage.ts')).runGrabImage(rest);
     case 'rip': return (await import('./rip.ts')).runRip(rest);
     case 'brief': return (await import('./brief.ts')).runBrief(rest);
     case 'init': return (await import('./init.ts')).runInit(rest);

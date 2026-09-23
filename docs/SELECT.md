@@ -26,6 +26,7 @@ and writes `find/<n>.png` with every level outlined in its own color. Pick the l
 
 | flag | when |
 |---|---|
+| `--like <screenshot.png>` | the user has a picture of it. Scored per element and per width: pixel similarity of 24x24 thumbnails (the screenshot's margins trimmed first), F1 overlap of its OCR'd words with the element's text, aspect ratio. `find --like` prints the ranking and `find/like.png` (the screenshot next to the best crops); `grab --like` takes the best and warns when the runner-up is within 0.02 |
 | `--select "<css>" [--nth N]` | you have a selector from `find` / `pick`. `--nth` indexes the *visible* matches |
 | `--text "<visible text>" --up N` | quick: the element containing that text, climbed N levels (same numbers as `find`) |
 | `--name "<layer>"` | Framer: `[data-framer-name="<layer>"]` |
@@ -41,3 +42,10 @@ Whatever you pass, `grab` resolves it once, then writes a canonical locator (sel
 - **Overlays** (menus, modals, dropdowns) that only exist after a click: open them first with a selector that matches the open state, or grab the trigger and read the open state from `capture/states/*-open.png` and `states.md`. For a modal, grab it with `--select` on the modal after opening it by hand in `pick` mode.
 - **Hidden until scrolled** (scroll reveals): `grab` runs the page's reveal pass (scroll top to bottom) before measuring, so the component is at rest. The entrance itself is in `capture/frames/enter`.
 - **Iframes / shadow DOM**: not supported. The element must be in the main document.
+
+## No url at all
+
+`clonethis grab-image shot.png [shot-390.png] --as name --vp 1440,390 [--dsf 2 | --css-width 341,358]` makes a reference out of screenshots. Tips:
+- One image per width, and say which width each is (`--vp`). The css size is pixels / dsf: a Mac screenshot is dsf 2.
+- Crop loosely: margins of plain page are trimmed (`--trim-threshold 48`, higher cuts more; `--no-trim` keeps the image as is). Soft shadows are cut, outlines and borders kept. Verify measures the build the same way (border box + outline).
+- A screenshot of a site you can load is weaker than the site: use `grab <url> --like shot.png` instead.

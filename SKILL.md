@@ -8,9 +8,11 @@ description: |
   every css rule that matches it across all stylesheets and breakpoints, fonts, assets, hover/press/focus/open
   diffs, 60fps frames, Framer appear + module rip), a standalone snapshot that must pass its own gate, then
   build it into the user's project and verify until `clonethis verify` says PASS at every width. Origin-blind:
-  the source is never named in the clone. Use when asked to "clone this component", "grab this navbar",
-  "steal this pricing card", "rip this section", "copy this button 1:1", "clonethis", "I want that <thing>
-  from <site>".
+  the source is never named in the clone. Input is a url + a way to name the element, a url + a SCREENSHOT of
+  the component (it finds the matching element itself), or screenshots alone (no url: the image is the
+  reference, gated on size, OCR'd text and pixels). Use when asked to "clone this component", "grab this
+  navbar", "steal this pricing card", "rip this section", "copy this button 1:1", "clonethis", "I want that
+  <thing> from <site>", "build this from the screenshot", "clone what's in this image".
 triggers:
   - clone this component
   - clonethis
@@ -19,6 +21,8 @@ triggers:
   - rip this navbar
   - steal this pricing card
   - clone just the hero
+  - clone this from a screenshot
+  - build this screenshot 1:1
 allowed-tools:
   - Bash
   - Read
@@ -54,6 +58,16 @@ clonethis find <url> "Most popular"          # hits by text / selector / layer n
                                              # (size, element count, a selector that survives reloads) + find/<n>.png with the chain outlined
 clonethis pick <url>                         # or: the user points at it in a real window, [ ] changes level, click takes it
 ```
+
+**Got a screenshot?** When the user drops an image of the component (with or without a url):
+
+```bash
+clonethis find <url> --like shot.png          # every element that looks like it, at every width: score, visual, OCR text overlap, crops + like.png
+clonethis grab <url> --like shot.png --as pricing-card     # takes the best match (warns when the top two are close)
+clonethis grab-image shot.png [shot-phone.png] --as pricing-card --vp 1440,390 [--dsf 2]   # NO url: the screenshot is the reference
+```
+
+With a url, always prefer `--like` over `grab-image`: the page gives the real css, fonts, states and motion; the screenshot only says which element. `grab-image` is for when there is no page (a design export, a shot of an app, a site behind a login): the reference is the image trimmed to its visible edge, its OCR'd text lines with ink boxes (Apple Vision, macOS), its palette and its row bands (the vertical rhythm). No DOM, no css, no states, no motion: read the image, identify the font (ask when unsure), build, and verify gates on the visible size, every OCR line being present, and pixels under 6%. `--dsf` is the screenshot's pixel ratio (2 for a Mac Retina screenshot); if text looks the wrong size, that is the knob.
 
 Read the `find/*.png` outlines. The right level is the element whose box is the component's visual edge (its background, border, shadow or padding), not the text inside it and not the section around it. When two readings are plausible (the card vs the card grid, the nav bar vs the whole header), ask the user with AskUserQuestion and show both sizes. docs/SELECT.md covers the edge cases: repeated components (`--nth`), per-breakpoint swaps, fixed navs, components inside a slider.
 

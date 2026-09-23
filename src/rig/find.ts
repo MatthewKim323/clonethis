@@ -19,6 +19,7 @@ const COLORS = ['#ff2d55', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#007aff'
 
 export async function runFind(argv: string[]) {
   const a = new Args(argv);
+  if (a.str('like')) return findLike(a);
   const [url, query] = a.positional;
   if (!url || !query) usage('usage: clonethis find <url> "<query: css selector | visible text | layer name>" [--w 1440] [--max 4] [--out find]');
   const vp = viewportByWidth(a.num('w', 1440));
@@ -125,5 +126,24 @@ export async function runPick(argv: string[]) {
     console.log(`\npicked: ${res.tag}${res.name ? ` [${res.name}]` : ''} ${Math.round(res.rect.w)}x${Math.round(res.rect.h)}, ${res.descendants} elements`);
     console.log(`selector: ${res.selector}${res.count > 1 ? `  (nth ${res.nth} of ${res.count} visible matches)` : ''}`);
     console.log(`\nclonethis grab <url> --select ${JSON.stringify(res.selector)}${res.nth ? ` --nth ${res.nth}` : ''} --as <name>`);
+  } finally { await browser.close(); }
+}
+
+/** find <url> --like shot.png: the elements that look most like the screenshot, across widths, with crops. */
+async function findLike(a: Args) {
+  const url = a.positional[0];
+  if (!url) usage('usage: clonethis find <url> --like <screenshot.png> [--w 1440,390] [--out find]');
+  const { locateByImage } = await import('../lib/likeness.ts');
+  const { VIEWPORTS } = await import('../lib/browser.ts');
+  const ws = a.list('w').map(Number);
+  const vps = ws.length ? ws.map((w) => viewportByWidth(w)) : [...VIEWPORTS];
+  const out = a.str('out', 'find');
+  const browser = await launch(true);
+  try {
+    const found = await locateByImage(browser, url, a.str('like')!, vps, { top: a.num('max', 4), outDir: out });
+    console.log('\n  score  visual  text   width  size          tag / name                    selector');
+    for (const f of found.slice(0, 10)) console.log(`  ${f.score.toFixed(3)}  ${f.visual.toFixed(3)}  ${f.text === null ? '  -  ' : f.text.toFixed(2).padStart(5)}  ${String(f.vp.width).padStart(5)}  ${`${Math.round(f.rect.w)}x${Math.round(f.rect.h)}`.padEnd(12)}  ${`${f.tag} ${f.label}`.slice(0, 28).padEnd(28)}  ${f.selector}${f.count > 1 ? `  --nth ${f.nth}` : ''}${f.crop ? `  (${f.crop})` : ''}`);
+    console.log(`\nscreenshot vs best matches: ${path.join(out, 'like.png')}`);
+    console.log('then: clonethis grab <url> --like <screenshot.png>   (takes the best), or --select "<selector>" [--nth N]');
   } finally { await browser.close(); }
 }

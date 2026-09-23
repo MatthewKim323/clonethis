@@ -328,6 +328,13 @@
     return { natural: r2(h1), actual: r2(h0), fromContext: Math.abs(h1 - h0) > 0.5 };
   }
 
+  /** How far the root paints outside its border box with an outline (px on each side). Shadows do not count. */
+  function outlineExtent(root) {
+    const cs = getComputedStyle(root);
+    if (cs.outlineStyle === 'none') return 0;
+    return Math.max(0, (parseFloat(cs.outlineWidth) || 0) + (parseFloat(cs.outlineOffset) || 0));
+  }
+
   /** Pin the root's border box so the component is measured in isolation from wherever it was placed. */
   function pin(root, w, h) {
     if (!root.hasAttribute('data-ct-prepin')) root.setAttribute('data-ct-prepin', root.getAttribute('style') || '');
@@ -557,5 +564,5 @@
     return scrollY;
   }
 
-  window.__ct = { rebrand, visible, visibleMatches, selectorFor, resolve, describe, candidates, tag, layout, texts, media, context, heightFromContext, pin, interactive, snap, diffSnap, transitionsOf, animations, refs, symbols, hideOverlays, restoreOverlays, html, scrollToRoot, pageRect, kebab };
+  window.__ct = { outlineExtent, rebrand, visible, visibleMatches, selectorFor, resolve, describe, candidates, tag, layout, texts, media, context, heightFromContext, pin, interactive, snap, diffSnap, transitionsOf, animations, refs, symbols, hideOverlays, restoreOverlays, html, scrollToRoot, pageRect, kebab };
 })();

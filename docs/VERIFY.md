@@ -21,6 +21,10 @@ The build marks its component root with `data-clone-root` (or pass `--select`). 
 
 `--no-pin` measures the component where the page puts it (placement check). `--max-diff off` reports pixels without gating (a component with a live video or a ticker). Exit 1 on FAIL; numbers in `reference/<name>/build/verify.json`; diff sheets (build | reference | mask) in `build/diff/<vp>.png`.
 
+### Image references (`grab-image`)
+
+No DOM behind them, so the checks change: the **visible** size (the build's border box plus its outline, the width pinned so it comes out at the screenshot's; tolerance 1px for the px / dsf rounding), every OCR'd line present in the build's text (80% of its character bigrams, so a misread glyph or a price merged with its unit still counts), and pixels under 6% (`--max-diff`). No media, states or motion checks. `compare` lists each OCR line with where your matching text run sits relative to its ink box (a few px apart is normal: ink box vs line box).
+
 ## Finding the last pixel
 
 1. `clonethis compare <url> <ref> --w <width>`: every reference text run next to yours with `dx dy dw dh`, line count, and the font / color when they differ. Rows are in reference order, so the first off row is usually the cause and the rest are knock-on: fix top-down.

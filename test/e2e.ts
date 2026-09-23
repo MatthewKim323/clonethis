@@ -50,6 +50,31 @@ try {
   check(!!tog && tog.open && tog.open.root.h > 0, 'states: disclosure opens');
   check(fs.readdirSync(path.join(REF, 'assets', 'fonts')).length === 2, 'two font files harvested');
   check(fs.existsSync(path.join(REF, 'capture', 'frames', 'enter', 'frames.json')), 'entrance frames recorded');
+
+  console.log('\n== screenshot input');
+  // find by screenshot: a sloppy retina crop (the card with 40px of page around it) must find the featured card
+  const { locateByImage } = await import('../src/lib/likeness.ts');
+  const { launch, VIEWPORTS } = await import('../src/lib/browser.ts');
+  const b = await launch(true);
+  try {
+    const hits = await locateByImage(b, `${site.url}/`, path.join(REF, 'capture', 'desktop', 'context.png'), [VIEWPORTS[0], VIEWPORTS[3]], { top: 3 });
+    check(hits[0]?.selector === 'article.plan-card.featured', `--like finds the card from a screenshot (${hits[0]?.selector}, score ${hits[0]?.score})`);
+    check(hits[0]?.vp.width === 1440, 'a desktop screenshot matches best at 1440');
+    const other = hits.find((h) => h.selector !== 'article.plan-card.featured' && h.tag === 'article');
+    check(!other || other.score < hits[0].score - 0.2, 'the other cards score well below it');
+  } finally { await b.close(); }
+  // no url: the screenshots are the reference; the snapshot of the same card must pass against it
+  const { runGrabImage } = await import('../src/grabimage.ts');
+  const img = await runGrabImage([path.join(REF, 'capture', 'desktop', 'context.png'), path.join(REF, 'capture', 'mobile', 'component.png'), '--as', 'card-img', '--vp', '1440,390', '--brand', 'Acme']);
+  const im = JSON.parse(fs.readFileSync(path.join(img.REF, 'component.json'), 'utf8'));
+  check(im.mode === 'image' && Math.abs(im.viewports.desktop.root.w - 346) <= 1, `grab-image trims to the card's visible edge (${im.viewports.desktop.root.w}x${im.viewports.desktop.root.h})`);
+  check(im.viewports.desktop.ocrLines >= 8 || process.platform !== 'darwin', `grab-image reads the text (${im.viewports.desktop.ocrLines} lines)`);
+  const snap = await serveDir(REF);
+  try {
+    const { verifyCore } = await import('../src/rig/verify.ts');
+    const v = await verifyCore(`${snap.url}/snapshot/index.html`, img.REF, { loc: { selector: '[data-clone-root]' }, tol: 0.5, textTol: 1, maxDiff: 3, pin: true, pixels: true, out: path.join(img.REF, 'build'), quiet: true });
+    for (const [vp, r] of Object.entries<any>(v.viewports)) check(r.pass, `the same card passes the image gate at ${vp} (text ${r.texts.ok}/${r.texts.total}, px ${r.pixels?.differPct}%)`);
+  } finally { snap.stop(); }
 } finally { site.stop(); }
 console.log(fails.length ? `\n${fails.length} FAILED` : '\nALL OK');
 process.exit(fails.length ? 1 : 0);

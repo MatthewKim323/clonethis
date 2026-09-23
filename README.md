@@ -44,6 +44,16 @@ clonethis verify  http://localhost:3777/clonethis/pricing-card reference/pricing
 clonethis blackout .
 ```
 
+### From a screenshot
+
+```bash
+clonethis find https://example.com/ --like card.png                 # which element looks like this? (pixels + OCR'd words + shape, every width)
+clonethis grab https://example.com/ --like card.png --as pricing-card  # grab the best match, full measured truth
+clonethis grab-image card.png card-phone.png --as pricing-card --vp 1440,390   # no url at all: the image is the reference
+```
+
+`grab-image` trims the screenshot to its visible edge (a crop is never exact; soft shadows fall away, borders and outlines stay), normalizes it to 2x, reads every text line with its box (Apple Vision, macOS), and measures the palette and the row bands (paddings and gaps in css px). `verify` then checks the visible size, that every OCR'd line is in your build, and the pixel diff (under 6%).
+
 As a Claude Code skill: "clone the pricing card from https://..." The agent finds the element (asking when "the card" could mean two things), grabs it, sets a `/goal`, builds it into your project and verifies until PASS.
 
 ## The gate
@@ -83,8 +93,9 @@ What comes out is yours. The live component is rebranded in the page before anyt
 
 ## Tested on
 
-- `bun run test` / `node test/e2e.ts`: a local fixture (a pricing card with web fonts, a looping badge, hover / press / focus transitions, a disclosure, ancestor-qualified rules, escaped utility classes, a phone breakpoint). The snapshot passes the gate at all four widths; states, fonts, keyframes and blackout are checked.
+- `node test/e2e.ts`: a local fixture (a pricing card with web fonts, a looping badge, hover / press / focus transitions, a disclosure, ancestor-qualified rules, escaped utility classes, a phone breakpoint). The snapshot passes the gate at all four widths; states, fonts, keyframes and blackout are checked.
 - The same card built by hand into a fresh Next.js app from the reference alone: `verify` PASS at 1440 / 1024 / 810 / 390, `states` 3 of 3 targets matching. Changing one font size from 13px to 14px fails it and `compare` names the runs and the font.
+- Screenshot input: a sloppy retina crop of that card (40px of page around it) finds the right element with `--like` (0.91 vs 0.47 for its siblings) at the right width; the same crop plus a phone shot as a `grab-image` reference passes against the Next.js build, and fails on the 13px to 14px change.
 - Live: a production Next.js site's sticky header (144 stylesheets, 6.4k rules), a Framer pricing card whose height comes from its grid row, and a Tailwind v4 button (cascade layers, native nesting, `@property`, a separate mobile variant). All three snapshots pass the gate at every width.
 
 ## Limits
@@ -95,6 +106,7 @@ What comes out is yours. The live component is rebranded in the page before anyt
 - States cover pointer and keyboard on elements inside the component. Things that open elsewhere on the page (a modal the button launches) are out of scope: grab them separately.
 - Screencasts are desktop only.
 - `pick` opens a real browser window and waits for a click; it is the one command without an automated test.
+- Screenshot-only references carry no css, states or motion, and OCR needs macOS (elsewhere `grab-image` still measures size, palette and bands, and verify skips the text check).
 
 ## Docs
 

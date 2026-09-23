@@ -19,7 +19,7 @@ import { Args, usage } from '../lib/args.ts';
 import { launch, newCtx, load, reveal, viewportByWidth, closeCtx, log, VIEWPORTS } from '../lib/browser.ts';
 import { ct, markRoot, parkMouse, type Locator } from '../lib/page.ts';
 import { shootRoot, settleMedia } from '../lib/shoot.ts';
-import { loadRef, measure, matchTexts, matchMedia } from './verify.ts';
+import { loadRef, measure, matchTexts, matchMedia, matchOcr } from './verify.ts';
 import { tokensFor, scrub } from '../lib/anon.ts';
 
 const locOf = (a: Args): Locator => ({ selector: a.str('select', '[data-clone-root]'), nth: a.num('nth', 0) });
@@ -73,6 +73,13 @@ export async function runCompare(argv: string[]) {
     if (!m.found) usage('component not found. Mark its root with data-clone-root or pass --select.');
     const tol = a.num('tol', 1);
     console.log(`root   ref ${ref.root.w}x${ref.root.h}   build ${m.root!.w}x${m.root!.h}   (unpinned ${m.unpinned!.w}x${m.unpinned!.h})   dh ${(m.root!.h - ref.root.h).toFixed(2)}`);
+    if (ref.mode === 'image') {
+      const rows = matchOcr(ref.ocr, m.texts);
+      console.log(`\nimage reference: ${rows.filter((r) => r.ok).length}/${rows.length} OCR lines present in the build (positions: ink box center vs your text run center, a few px is normal)`);
+      for (const r of rows) console.log(`   ${r.ok ? ' ok ' : ' -- '} ${r.found.padStart(5)}  ${r.dx === null ? '' : `dx ${String(r.dx).padStart(6)} dy ${String(r.dy).padStart(6)}`}  ${JSON.stringify(r.text.slice(0, 50))}`);
+      console.log('\npixels: `clonethis shot` then `clonethis diff <yours.png> ' + path.join(refDir, 'capture', ref.vp.name, 'component.png') + ' diff.png`; rows / gaps: capture/<vp>/bands.json');
+      return;
+    }
     const { rows, extra } = matchTexts(ref.texts, m.texts, tol);
     console.log(`\ntext runs (reference order): ${rows.filter((r) => r.ok).length}/${rows.length} within ${tol}px`);
     console.log('   ok    ref y     x       w      h  | build y     x       w      h  |   dx    dy    dw    dh  text / font');

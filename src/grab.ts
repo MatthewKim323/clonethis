@@ -1,7 +1,7 @@
 /**
  * grab: one component off a live page into reference/<name>/, measured the same way at every width.
  *
- *   clonethis grab <url> (--select <css> [--nth N] | --name <framer name> | --text "<visible text>" [--up N]) [--as pricing]
+ *   clonethis grab <url> (--select <css> [--nth N] | --name <framer name> | --text "<visible text>" [--up N] | --like <screenshot.png>) [--as pricing]
  *                  [--brand Name] [--tokens a,b] [--viewports 1440,1024,810,390] [--headless] [--no-frames] [--no-states] [--max-states 8]
  *
  * Per width (1440 / 1024 / 810 / 390): component.png (2x, the root's border box and nothing else), context.png
@@ -78,15 +78,30 @@ export async function runGrab(argv: string[]) {
 
   // ---------------------------------------------------------------- 1. resolve the target on a desktop load (headed so the user sees it)
   log(`grab -> ${path.relative(process.cwd(), REF)} (headed=${!headless})`);
+  // --like <screenshot>: find the element that looks like the screenshot, at whichever width it shows up best
+  let fvp = vps[0];
+  let liked: Locator | null = null;
+  if (a.str('like')) {
+    const { locateByImage } = await import('./lib/likeness.ts');
+    const found = await locateByImage(await pool.get(), url, a.str('like')!, vps, { top: 3 });
+    const best = found[0];
+    if (!best) usage('nothing on the page looks like that screenshot. Try `clonethis find <url> --like <png>` to see the candidates.');
+    log(`  like: best ${best.tag} ${Math.round(best.rect.w)}x${Math.round(best.rect.h)} at ${best.vp.width}px, score ${best.score} (visual ${best.visual}${best.text !== null ? `, text ${best.text}` : ''})`);
+    if (best.score < 0.6) log('  like: low confidence. Check capture/*/component.png against your screenshot, or pick with `clonethis find --like`.');
+    const runner = found[1];
+    if (runner && runner.score > best.score - 0.02 && (runner.rect.w !== best.rect.w || runner.rect.h !== best.rect.h)) log(`  like: close second ${runner.tag} ${Math.round(runner.rect.w)}x${Math.round(runner.rect.h)} (${runner.score}); \`find --like\` shows both`);
+    fvp = best.vp;
+    liked = { selector: best.selector, nth: best.nth };
+  }
   const first = await launch(headless);
-  const fctx = await newCtx(first, vps[0], 1);
+  const fctx = await newCtx(first, fvp, 1);
   const fpage = await fctx.newPage();
   await load(fpage, url);
   const title = await fpage.title();
   await reveal(fpage);
-  const loc0 = await initialLocator(fpage, a);
+  const loc0 = liked ?? (await initialLocator(fpage, a));
   const r0 = await markRoot(fpage, loc0);
-  if (!r0) usage(`nothing visible matches ${JSON.stringify(loc0)} at ${vps[0].width}px. Try \`clonethis find\`.`);
+  if (!r0) usage(`nothing visible matches ${JSON.stringify(loc0)} at ${fvp.width}px. Try \`clonethis find\`.`);
   // a canonical selector for re-finding it at every width (kept in .origin.json: it can carry origin words)
   const canon = await fpage.evaluate(() => {
     const c = (window as any).__ct;
@@ -99,6 +114,7 @@ export async function runGrab(argv: string[]) {
     return { ...s, nthText, tag: el.tagName.toLowerCase(), name: el.getAttribute('data-framer-name') || undefined, text };
   });
   const locator: Locator = a.str('select') ? { ...loc0, tag: canon.tag, name: canon.name } : { selector: canon.selector, nth: canon.nth, tag: canon.tag, name: canon.name };
+  if (liked && canon.count === 1) Object.assign(locator, { selector: canon.selector, nth: 0 });
   if (!a.str('select') && canon.count > 1 && canon.text && (canon.nthText ?? -1) >= 0) { locator.text = canon.text; locator.nth = canon.nthText; }
   // a selector unique at one width can match something else at another (a desktop-only button and a mobile one
   // sharing a class): carry the text too, so a width where the component is not rendered reads as missing

@@ -17,6 +17,7 @@ export function writeBrief(root: string) {
   const brand = origin?.brand ?? meta.brand ?? 'Brand';
   const rel = path.relative(process.cwd(), root) || '.';
   const name = path.basename(root);
+  if (meta.mode === 'image') return writeImageBrief(root, meta, brand, rel, name);
   const L: string[] = [];
   L.push(`# REBUILD: ${name}`, '', `> Captured ${meta.capturedAt ?? '?'} by clonethis. One component, measured at every width. Build from these files; never eyeball a number.`, '');
   L.push('## Origin blackout (not optional)', '');
@@ -70,6 +71,40 @@ export function writeBrief(root: string) {
   L.push(`clonethis verify http://localhost:3777/<page> ${rel}                                      # THE GATE: PASS at every width or keep going`);
   L.push(`clonethis blackout .`);
   L.push('```', '', 'Rules for the build are in `reference/CONVENTIONS.md` (written by `clonethis init`). Method: the clonethis skill `docs/METHOD.md`.', '');
+  fs.writeFileSync(path.join(root, 'REBUILD.md'), L.join('\n'));
+  return path.join(root, 'REBUILD.md');
+}
+
+/** REBUILD.md for a reference grabbed from screenshots: no DOM, no CSS, so the brief is about reading pixels well. */
+function writeImageBrief(root: string, meta: any, brand: string, rel: string, name: string) {
+  const L: string[] = [];
+  L.push(`# REBUILD: ${name} (from screenshots)`, '', `> Captured ${meta.capturedAt} by clonethis grab-image. There is no page behind this reference: no DOM, no css, no states, no motion. What is here was measured off the pixels. Look at the images first, every width.`, '');
+  L.push('## Origin blackout', '', `The pixels may show another brand's name or logo. The clone is ${brand}'s: write ${brand}'s copy where a brand name appears, use a placeholder mark, and never name where the screenshot came from in code, comments, alt text or commits. \`clonethis blackout .\` (with \`--tokens\` for any name you know is in the image).`, '');
+  L.push('## Sizes', '', '| width | component (css px) | screenshot dsf | text lines | row bands |', '|---|---|---|---|---|');
+  for (const [vp, v] of Object.entries<any>(meta.viewports ?? {})) L.push(`| ${vp} ${v.width} | ${v.root.w} x ${v.root.h} | ${v.dsf} | ${v.ocrLines} | ${v.rows} |`);
+  L.push('', 'The css size is the screenshot size divided by its pixel ratio (`--dsf`, 2 for a Retina screenshot). If the text looks too big or too small against a known font size, the ratio is wrong: re-run `grab-image` with `--dsf` or `--css-width`.', '');
+  for (const [vp] of Object.entries<any>(meta.viewports ?? {})) {
+    const dir = path.join(root, 'capture', vp);
+    const o = JSON.parse(fs.readFileSync(path.join(dir, 'ocr.json'), 'utf8'));
+    const p = JSON.parse(fs.readFileSync(path.join(dir, 'palette.json'), 'utf8'));
+    const b = JSON.parse(fs.readFileSync(path.join(dir, 'bands.json'), 'utf8'));
+    L.push(`## ${vp}`, '', `\`capture/${vp}/component.png\` (2x). Background ${p.background}.`, '', '**Text (OCR, ink boxes in css px: x, y, w, h. Ink height is roughly cap height; font size is usually 1.3 to 1.5x it)**', '');
+    for (const l of o) L.push(`- ${l.x}, ${l.y}, ${l.w} x ${l.h}  "${l.text}"${l.confidence < 0.5 ? ' (low confidence: read it off the image)' : ''}`);
+    L.push('', '**Colors (share of the area)**', '', p.colors.map((c: any) => `\`${c.color}\` ${(c.share * 100).toFixed(1)}%`).join(', '), '', '**Row bands (content separated by background; the gaps between them are your paddings and gaps)**', '');
+    let prev = 0;
+    for (const r of b.rows) { L.push(`- y ${r.y} h ${r.h} (gap above ${+(r.y - prev).toFixed(1)})${r.cols.length > 1 ? `, columns: ${r.cols.map((c: any) => `${c.x}+${c.w}`).join(' ')}` : ''}`); prev = r.y + r.h; }
+    L.push('');
+  }
+  L.push('## How to build from pixels', '');
+  L.push('- Identify the font from the glyphs (ask the user when it is not obvious: the gate reads text boxes, so a wrong font shows up). Check your guess: render the OCR lines at a candidate size and compare widths with the ink boxes above.');
+  L.push('- Sizes from the bands, colors from the palette (sample exact pixels from component.png with sharp or an eyedropper when a color is small), radii and shadows by eye, then tighten with the pixel diff.');
+  L.push('- Hover, focus and motion are not in a screenshot. Build sensible defaults only if the user asks, and say they are not from the reference.', '');
+  L.push('## The loop', '', '```bash');
+  L.push(`clonethis shot http://localhost:3777/<page> ${rel}/build/1440.png --ref ${rel} --w 1440`);
+  L.push(`clonethis diff ${rel}/build/1440.png ${rel}/capture/desktop/component.png ${rel}/build/diff-1440.png   # Read the sheet: build | reference | mask`);
+  L.push(`clonethis compare http://localhost:3777/<page> ${rel} --w 1440      # every OCR line present? where is it vs the ink box`);
+  L.push(`clonethis verify http://localhost:3777/<page> ${rel}               # size + text present + pixels under 6%`);
+  L.push('```', '');
   fs.writeFileSync(path.join(root, 'REBUILD.md'), L.join('\n'));
   return path.join(root, 'REBUILD.md');
 }
