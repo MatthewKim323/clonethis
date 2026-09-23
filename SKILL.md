@@ -37,12 +37,12 @@ allowed-tools:
 ## Setup (idempotent)
 
 ```bash
-cd ~/.claude/skills/clonethis && [ -d node_modules ] || bun install
+cd ~/.claude/skills/clonethis && [ -d node_modules ] || bun install   # or npm install
 export PATH="$HOME/.claude/skills/clonethis/bin:$PATH"   # or call bin/clonethis by path
 clonethis help
 ```
 
-The shim installs the matching Chromium on first run.
+Needs Node >= 22.18 (the shim runs the TypeScript CLI on Node; bun only installs). The shim installs the matching Chromium on first run.
 
 ## The flow (docs/METHOD.md has the reasoning)
 
@@ -109,7 +109,7 @@ A clean, verified component is design-vault material. If the design-vault skill 
 - States are measured, not guessed: the pointer moves onto every interactive element, presses (released off it so nothing fires), keyboard-focuses, clicks toggles open and shut. Properties an infinite loop keeps moving are ignored in the diffs.
 - Motion values come from source (animations.json keyframes and timing, states.md transitions, the Framer rip), never from eyeballing frames. Frames verify timing.
 - Links are never followed, forms never submitted, buttons never clicked unless they are toggles (aria-expanded, summary, tabs, accordions).
-- One dev server on one port for the whole job. Never start a second one.
+- One dev server on one port for the whole job. Never start a second one, and never kill a process you did not start to free a port: pick another port.
 - No em dashes anywhere in generated code or docs.
 - Do not grab from authenticated or paywalled pages without the user confirming they have the right to.
 
