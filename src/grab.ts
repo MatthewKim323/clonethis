@@ -107,7 +107,8 @@ export async function runGrab(argv: string[]) {
     const c = (window as any).__ct;
     const el = document.querySelector('[data-ct-root]')!;
     const s = c.selectorFor(el);
-    const text = ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim().slice(0, 40) || undefined;
+    // cut at the first digit: live counters, clocks and prices change between loads and would break the re-find
+    const text = ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim().split(/\d/)[0].trim().slice(0, 40) || undefined;
     // several visible matches: pin it by its text too, with nth counted among the ones that carry that text
     let nthText: number | undefined;
     if (s.count > 1 && text) { const l = (c.visibleMatches(s.selector) || []).filter((e: Element) => (e.textContent || '').replace(/\s+/g, ' ').includes(text)); nthText = l.indexOf(el); }
