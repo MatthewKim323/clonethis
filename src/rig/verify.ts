@@ -43,10 +43,32 @@ export function loadRef(ref: string): RefVp[] {
   return out.sort((a, b) => b.vp.width - a.vp.width);
 }
 
-export type Measured = { found: boolean; unpinned?: { w: number; h: number }; root?: { w: number; h: number }; texts: any[]; media: any[]; errors: string[]; shot?: string; outline?: number };
+export type Measured = { found: boolean; unpinned?: { w: number; h: number }; root?: { w: number; h: number }; texts: any[]; media: any[]; errors: string[]; shot?: string; outline?: number; liveCids?: string[] };
+
+/**
+ * Live regions on the reference side: elements matching a simple compound selector (tag and / or .classes,
+ * as recorded in layout.json) plus everything under them. Their text runs and media are left out of the
+ * comparison on both sides and their boxes are masked in the pixel diff: a counter or marquee is mid-flight
+ * in any capture, so only its box (which the root height still checks) can match.
+ */
+export function refLive(refDir: string, vpName: string, sels: string[]): { cids: Set<string>; rects: { x: number; y: number; w: number; h: number }[] } {
+  const f = path.join(refDir, 'capture', vpName, 'layout.json');
+  const cids = new Set<string>(); const rects: { x: number; y: number; w: number; h: number }[] = [];
+  if (!sels.length || !fs.existsSync(f)) return { cids, rects };
+  const L: any[] = JSON.parse(fs.readFileSync(f, 'utf8'));
+  const parsed = sels.map((sel) => { const m = sel.trim().match(/^([a-z][a-z0-9-]*)?((?:\.[\w-]+)*)$/i); if (!m) usage(`--live takes simple selectors (tag and / or .classes): ${sel}`); return { tag: m![1]?.toLowerCase(), classes: (m![2] || '').split('.').filter(Boolean) }; });
+  const hit = new Set<string>();
+  for (const e of L) {
+    const cls = String(e.classes || '').split(/\s+/);
+    if (parsed.some((p) => (!p.tag || p.tag === e.tag) && p.classes.every((c) => cls.includes(c)) && (p.tag || p.classes.length))) { hit.add(e.cid); if (e.rect) rects.push(e.rect); }
+  }
+  const parent = new Map(L.map((e) => [e.cid, e.parent]));
+  for (const e of L) { let c: string | null = e.cid; while (c) { if (hit.has(c)) { cids.add(e.cid); break; } c = parent.get(c) ?? null; } }
+  return { cids, rects };
+}
 
 /** Load a build url at a width, find its component, pin it like the reference, measure texts / media / shot. */
-export async function measure(browser: Browser, url: string, loc: Locator, ref: RefVp, opts: { pin?: boolean; shot?: string; wait?: number; margin?: number }): Promise<Measured> {
+export async function measure(browser: Browser, url: string, loc: Locator, ref: RefVp, opts: { pin?: boolean; shot?: string; wait?: number; margin?: number; live?: string[] }): Promise<Measured> {
   const ctx = await newCtx(browser, ref.vp, 2);
   const errors: string[] = [];
   try {
@@ -67,10 +89,21 @@ export async function measure(browser: Browser, url: string, loc: Locator, ref: 
     }
     const r = (await rootRect(page))!;
     const outline = await ct<number>(page, 'outlineExtent', '$root');
+    // live regions (a ticking counter, a marquee): every element inside them, by data-ct-id
+    const liveCids: string[] = opts.live?.length ? await page.evaluate((sels) => {
+      const root = document.querySelector('[data-ct-root]');
+      if (!root) return [];
+      // the build is not stamped by default: give every element an id so runs and media carry one
+      let n = 0;
+      for (const e of [root, ...root.querySelectorAll('*')]) if (!e.getAttribute('data-ct-id')) e.setAttribute('data-ct-id', 'b' + n++);
+      const out = new Set<string>();
+      for (const sel of sels) for (const el of [...(root.matches(sel) ? [root] : []), ...root.querySelectorAll(sel)]) for (const e of [el, ...el.querySelectorAll('*')]) { const id = e.getAttribute('data-ct-id'); if (id) out.add(id); }
+      return [...out];
+    }, opts.live) : [];
     const texts = await ct<any[]>(page, 'texts', '$root');
     const media = await ct<any[]>(page, 'media', '$root');
     if (opts.shot) { fs.mkdirSync(path.dirname(opts.shot), { recursive: true }); await shootRoot(page, opts.shot, { vp: ref.vp, dsf: 2, settleMs: 400, margin: opts.margin ?? 0 }); }
-    return { found: true, unpinned: { w: +u.w.toFixed(2), h: +u.h.toFixed(2) }, root: { w: +r.w.toFixed(2), h: +r.h.toFixed(2) }, texts, media, errors: [...new Set(errors)], shot: opts.shot, outline };
+    return { found: true, unpinned: { w: +u.w.toFixed(2), h: +u.h.toFixed(2) }, root: { w: +r.w.toFixed(2), h: +r.h.toFixed(2) }, texts, media, errors: [...new Set(errors)], shot: opts.shot, outline, liveCids };
   } finally { await closeCtx(ctx); }
 }
 
@@ -159,7 +192,7 @@ export async function pixelDiff(buildPng: string, refPng: string, out: string | 
 
 type VpResult = { width: number; pass: boolean; root: any; texts: { total: number; ok: number; missing: number; off: number; extra: number; worst: TextRow[] }; media: { total: number; ok: number }; pixels: any; console: string[]; notes: string[] };
 
-export async function verifyCore(url: string, ref: string, opts: { loc: Locator; widths?: number[]; tol: number; textTol: number; maxDiff: number | null; maxDiffSet?: boolean; pin: boolean; pinImage?: boolean; pixels: boolean; out: string; quiet?: boolean }) {
+export async function verifyCore(url: string, ref: string, opts: { loc: Locator; widths?: number[]; tol: number; textTol: number; maxDiff: number | null; maxDiffSet?: boolean; pin: boolean; pinImage?: boolean; pixels: boolean; out: string; quiet?: boolean; live?: string[] }) {
   const refs = loadRef(ref).filter((r) => !opts.widths?.length || opts.widths.includes(r.vp.width));
   if (!refs.length) usage(`no captured widths in ${ref}/capture. Run clonethis grab first.`);
   fs.mkdirSync(opts.out, { recursive: true });
@@ -187,7 +220,7 @@ export async function verifyCore(url: string, ref: string, opts: { loc: Locator;
       };
       let m: Measured;
       let visible: { w: number; h: number } | null = null;
-      if (!image) m = await measure(browser, url, opts.loc, r, { pin: opts.pin, shot });
+      if (!image) m = await measure(browser, url, opts.loc, r, { pin: opts.pin, shot, live: opts.live });
       else {
         // the component's width belongs to where it sits here too: pin its border box so its visible width comes
         // out at the screenshot's (first pass reads its outline)
@@ -205,13 +238,18 @@ export async function verifyCore(url: string, ref: string, opts: { loc: Locator;
       const got = image && visible ? visible : m.root!;
       const hOk = Math.abs(got.h - r.root.h) <= tol;
       const wOk = Math.abs(got.w - r.root.w) <= tol;
-      const { rows, extra } = matchTexts(r.texts, m.texts, opts.textTol);
+      const live = refLive(ref, r.vp.name, image ? [] : opts.live ?? []);
+      const bLive = new Set(m.liveCids ?? []);
+      const refTexts = r.texts.filter((t) => !live.cids.has(t.cid)), refMedia = r.media.filter((t) => !live.cids.has(t.cid));
+      m.texts = m.texts.filter((t) => !bLive.has(t.cid)); m.media = m.media.filter((t) => !bLive.has(t.cid));
+      if (live.cids.size) notes.push(`live: ${r.texts.length - refTexts.length} text runs + ${r.media.length - refMedia.length} media left out, ${live.rects.length} region(s) masked (${opts.live!.join(', ')})`);
+      const { rows, extra } = matchTexts(refTexts, m.texts, opts.textTol);
       const ocrRows = image ? matchOcr(r.ocr, m.texts) : [];
       if (image) for (const o of ocrRows) rows.push({ text: o.text, ref: o.ref, build: o.ok ? o.build : null, ok: o.ok, note: `ocr ${o.found} of it found` });
-      const media = image ? [] : matchMedia(r.media, m.media, opts.textTol);
+      const media = image ? [] : matchMedia(refMedia, m.media, opts.textTol);
       let pixels: any = null;
       if (shot && opts.pixels && fs.existsSync(r.shot)) {
-        const mask = r.media.filter((x) => ['video', 'canvas', 'iframe', 'loop'].includes(x.kind));
+        const mask = [...r.media.filter((x) => ['video', 'canvas', 'iframe', 'loop'].includes(x.kind)), ...live.rects];
         pixels = await pixelDiff(shot, r.shot, path.join(opts.out, 'diff', `${r.vp.name}.png`), mask);
         if (pixels.sizeDelta > 2) notes.push(`shot size differs by ${pixels.sizeDelta}px (2x): compared the overlapping area`);
       }
@@ -243,11 +281,11 @@ export async function verifyCore(url: string, ref: string, opts: { loc: Locator;
 export async function runVerify(argv: string[]) {
   const a = new Args(argv);
   const [url, ref] = a.positional;
-  if (!url || !ref) usage('usage: clonethis verify <buildUrl> <reference/name> [--select "[data-clone-root]"] [--nth 0] [--w 1440,390] [--tol 0.5] [--text-tol 1] [--max-diff 3] [--no-pin] [--no-pixels] [--no-blackout] [--project .]');
+  if (!url || !ref) usage('usage: clonethis verify <buildUrl> <reference/name> [--select "[data-clone-root]"] [--nth 0] [--w 1440,390] [--tol 0.5] [--text-tol 1] [--max-diff 3] [--no-pin] [--no-pixels] [--no-blackout] [--live .counter,.marquee] [--project .]');
   const loc: Locator = { selector: a.str('select', '[data-clone-root]'), nth: a.num('nth', 0) };
   const out = a.str('out', path.join(ref, 'build'));
   const maxDiff = a.str('max-diff') === 'off' ? null : a.num('max-diff', 3);
-  const result: any = await verifyCore(url, ref, { loc, widths: a.list('w').map(Number), tol: a.num('tol', 0.5), textTol: a.num('text-tol', 1), maxDiff, maxDiffSet: a.str('max-diff') !== undefined, pinImage: a.flag('pin'), pin: !a.flag('no-pin'), pixels: !a.flag('no-pixels'), out });
+  const result: any = await verifyCore(url, ref, { loc, widths: a.list('w').map(Number), tol: a.num('tol', 0.5), textTol: a.num('text-tol', 1), maxDiff, maxDiffSet: a.str('max-diff') !== undefined, pinImage: a.flag('pin'), pin: !a.flag('no-pin'), pixels: !a.flag('no-pixels'), out, live: a.list('live') });
   if (!a.flag('no-blackout')) {
     console.log('\n== origin blackout');
     const { runBlackout } = await import('./blackout.ts');
