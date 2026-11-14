@@ -19,7 +19,7 @@ The build marks its component root with `data-clone-root` (or pass `--select`). 
 | console | zero errors while loading and scrolling | |
 | blackout | `clonethis blackout <project>` clean | the clone never names its origin |
 
-`--no-pin` measures the component where the page puts it (placement check). `--max-diff off` reports pixels without gating (a component with a live video or a ticker). Exit 1 on FAIL; numbers in `reference/<name>/build/verify.json`; diff sheets (build | reference | mask) in `build/diff/<vp>.png`.
+`--no-pin` measures the component where the page puts it (placement check). `--max-diff off` reports pixels without gating (a component with a live video or a ticker). `--live .counter,.marquee` is the better tool for a region that moves on its own: its text runs and media drop out of the match on both sides and its box is masked in the pixel diff, so everything else still gates (simple selectors: tag and / or .classes). Exit 1 on FAIL; numbers in `reference/<name>/build/verify.json`; diff sheets (build | reference | mask) in `build/diff/<vp>.png`.
 
 ### Image references (`grab-image`)
 
